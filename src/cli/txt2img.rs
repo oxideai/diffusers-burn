@@ -2,10 +2,8 @@ use anyhow::Result;
 use clap::Args;
 
 use burn::{
-    config::Config,
-    module::{Module, Param},
-    nn,
-    tensor::{backend::Backend, Tensor, f16},
+    module::{Module},
+    tensor::{backend::Backend},
 };
 
 #[cfg(feature = "wgpu-backend")]
@@ -17,7 +15,7 @@ use diffusers_burn::pipelines::stable_diffusion;
 const GUIDANCE_SCALE: f64 = 7.5;
 
 #[derive(Args, Debug)]
-pub struct SampleArgs {
+pub struct Txt2ImgArgs {
     /// The prompt to be used for image generation.
     #[arg(long, default_value = "Sand dunes with a solar eclipse in the sky")]
     prompt: String,
@@ -99,7 +97,7 @@ enum StableDiffusionVersion {
     Xl,
 }
 
-pub fn handle_convert(args: &SampleArgs) -> Result<()> {
+pub fn handle_txt2img(args: &Txt2ImgArgs) -> Result<()> {
     #[cfg(feature = "wgpu-backend")] {
         type Backend = WgpuBackend<AutoGraphicsApi, f32, i32>;
         let device = WgpuDevice::BestAvailable;

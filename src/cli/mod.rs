@@ -1,2 +1,2 @@
 pub mod convert;
-pub mod sample;
+pub mod txt2img;
