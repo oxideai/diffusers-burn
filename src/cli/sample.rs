@@ -12,6 +12,7 @@ use burn::{
 use burn_wgpu::{WgpuBackend, WgpuDevice, AutoGraphicsApi};
 #[cfg(not(feature = "wgpu-backend"))]
 use burn_tch::{TchBackend, TchDevice};
+use diffusers_burn::pipelines::stable_diffusion;
 
 const GUIDANCE_SCALE: f64 = 7.5;
 
@@ -107,6 +108,13 @@ pub fn handle_convert(args: &SampleArgs) -> Result<()> {
         type Backend = TchBackend<f32>;
         let device = TchDevice::Cpu;
     }
+
+    let Args {
+        height,
+        width,
+        sliced_attention_size,
+        ..
+    } = args;
 
     let sd_config = match args.sd_version {
         StableDiffusionVersion::V1_5 => {
