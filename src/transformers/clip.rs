@@ -5,17 +5,20 @@
 //!
 //! https://github.com/openai/CLIP
 
+use std::alloc::GlobalAlloc;
+use std::cmp::max;
+
+use burn::tensor::activation::softmax;
+use burn::tensor::ops::TensorOps;
 use burn::{
     module::Module,
     nn,
     tensor::{
-        Int,
-        Tensor,
         activation::{gelu, sigmoid},
         backend::Backend,
-    }
+        Int, Tensor,
+    },
 };
-use burn::tensor::activation::softmax;
 
 #[derive(Module, Debug, Clone, Copy)]
 pub enum Activation {
@@ -35,7 +38,7 @@ impl Activation {
 #[derive(Debug, Clone)]
 pub struct Config {
     vocab_size: usize,
-    embed_dim: usize, // aka config.hidden_size
+    embed_dim: usize,       // aka config.hidden_size
     activation: Activation, // aka config.hidden_act
     intermediate_size: usize,
     max_position_embeddings: usize,
@@ -124,25 +127,35 @@ impl Config {
 struct ClipTextEmbeddings<B: Backend> {
     token_embedding: nn::Embedding<B>,
     position_embedding: nn::Embedding<B>,
-    position_ids: Tensor<B, 2, Int>,
+    position_ids: Tensor<B, 2>,
 }
 
 impl<B: Backend> ClipTextEmbeddings<B> {
-    fn new(device: &Backend::Device, c: &Config) -> Self {
+    fn new(device: &B::Device, c: &Config) -> Self {
         let token_embedding = nn::EmbeddingConfig::new(c.vocab_size, c.embed_dim).init();
-        let position_embedding = nn::EmbeddingConfig::new(c.max_position_embeddings, c.embed_dim).init();
-        let position_ids = Tensor::arange_device(0..c.max_position_embeddings, device).unsqueeze();
-        ClipTextEmbeddings { token_embedding, position_embedding, position_ids }
+        let position_embedding =
+            nn::EmbeddingConfig::new(c.max_position_embeddings, c.embed_dim).init();
+        let position_ids = Tensor::arange_device(0..c.max_position_embeddings, device)
+            .unsqueeze()
+            .float();
+
+        ClipTextEmbeddings {
+            token_embedding,
+            position_embedding,
+            position_ids,
+        }
     }
 
     pub fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let token_embedding = self.token_embedding.forward(xs);
-        let position_embedding = self.position_embedding.forward(self.position_ids.clone());
+        let position_embedding = self
+            .position_embedding
+            .forward(self.position_ids.to_owned().int());
         token_embedding + position_embedding
     }
 }
 
-#[derive(Debug)]
+#[derive(Module, Debug)]
 struct ClipAttention<B: Backend> {
     k_proj: nn::Linear<B>,
     v_proj: nn::Linear<B>,
@@ -155,7 +168,13 @@ struct ClipAttention<B: Backend> {
 
 impl<B: Backend> ClipAttention<B> {
     fn new(c: &Config) -> Self {
-        assert_eq!(c.embed_dim % c.num_attention_heads, 0, "embed_dim {} must be a multiple of num_attention_heads {}", c.embed_dim, c.num_attention_heads);
+        assert_eq!(
+            c.embed_dim % c.num_attention_heads,
+            0,
+            "embed_dim {} must be a multiple of num_attention_heads {}",
+            c.embed_dim,
+            c.num_attention_heads
+        );
 
         let embed_dim = c.embed_dim;
         let num_attention_heads = c.num_attention_heads;
@@ -171,50 +190,62 @@ impl<B: Backend> ClipAttention<B> {
         let out_proj = nn::LinearConfig::new(embed_dim, embed_dim).init();
         let head_dim = embed_dim / num_attention_heads;
         let scale = (head_dim as f64).powf(-0.5);
-        ClipAttention { k_proj, v_proj, q_proj, out_proj, head_dim, scale, num_attention_heads }
+        ClipAttention {
+            k_proj,
+            v_proj,
+            q_proj,
+            out_proj,
+            head_dim,
+            scale,
+            num_attention_heads,
+        }
     }
 
-    fn shape(&self, xs: &Tensor<B, 3>, seq_len: usize, bsz: usize) -> Tensor<B, 4> {
+    fn shape(&self, xs: Tensor<B, 3>, seq_len: usize, bsz: usize) -> Tensor<B, 4> {
         xs.reshape([bsz, seq_len, self.num_attention_heads, self.head_dim])
             .swap_dims(1, 2)
-            .contiguous()
+        // .contiguous() // TODO: Figure out if this is needed or if we can abstract over memory
     }
 
     pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
         let [bsz, seq_len, embed_dim] = xs.dims();
         let query_states = self.q_proj.forward(xs.clone()) * self.scale;
-        let proj_shape = (bsz * self.num_attention_heads, seq_len, self.head_dim);
+        let proj_shape = [bsz * self.num_attention_heads, seq_len, self.head_dim];
+
         let query_states = self
-            .shape(&query_states, seq_len, bsz)
+            .shape(query_states, seq_len, bsz)
             .reshape(proj_shape)
             .to_full_precision();
         let key_states = self
-            .shape(&self.k_proj.forward(xs.clone()), seq_len, bsz)
+            .shape(self.k_proj.forward(xs.clone()), seq_len, bsz)
             .reshape(proj_shape)
             .to_full_precision();
         let value_states = self
-            .shape(&self.v_proj.forward(xs), seq_len, bsz)
+            .shape(self.v_proj.forward(xs), seq_len, bsz)
             .reshape(proj_shape)
             .to_full_precision();
+        let src_len = key_states.dims()[1];
         let attn_weights = query_states.matmul(key_states.swap_dims(1, 2));
 
-        let src_len = key_states.dims()[1];
         let attn_weights = attn_weights
             .reshape([bsz, self.num_attention_heads, seq_len, src_len])
-            + causal_attention_mask.unsqueeze::<4>();
-        let attn_weights = attn_weights
-            .reshape([bsz * self.num_attention_heads, seq_len, src_len]);
+            .add(
+                causal_attention_mask
+                    .to_owned()
+                    .unsqueeze::<4>()
+                    .to_full_precision(),
+            );
+        let attn_weights = attn_weights.reshape([bsz * self.num_attention_heads, seq_len, src_len]);
         let attn_weights = softmax(attn_weights, 3);
 
-        let attn_output = attn_weights
-            .matmul(value_states)
-            .to_full_precision();
+        let attn_output = attn_weights.matmul(value_states);
         let attn_output = attn_output
             .reshape([bsz, self.num_attention_heads, seq_len, self.head_dim])
             .swap_dims(1, 2)
             .reshape([bsz, seq_len, embed_dim]);
 
-        self.out_proj.forward(attn_output)
+        self.out_proj
+            .forward(Tensor::from_full_precision(attn_output))
     }
 }
 
@@ -229,7 +260,11 @@ impl<B: Backend> ClipMlp<B> {
     fn new(c: &Config) -> Self {
         let fc1 = nn::LinearConfig::new(c.embed_dim, c.intermediate_size).init();
         let fc2 = nn::LinearConfig::new(c.intermediate_size, c.embed_dim).init();
-        ClipMlp { fc1, fc2, activation: c.activation }
+        ClipMlp {
+            fc1,
+            fc2,
+            activation: c.activation,
+        }
     }
 
     fn forward<const D: usize>(&self, xs: Tensor<B, D>) -> Tensor<B, D> {
@@ -238,7 +273,7 @@ impl<B: Backend> ClipMlp<B> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Module, Debug)]
 struct ClipEncoderLayer<B: Backend> {
     self_attn: ClipAttention<B>,
     layer_norm1: nn::LayerNorm<B>,
@@ -252,23 +287,28 @@ impl<B: Backend> ClipEncoderLayer<B> {
         let layer_norm1 = nn::LayerNormConfig::new(c.embed_dim).init();
         let mlp = ClipMlp::new(c);
         let layer_norm2 = nn::LayerNormConfig::new(c.embed_dim).init();
-        ClipEncoderLayer { self_attn, layer_norm1, mlp, layer_norm2 }
+        ClipEncoderLayer {
+            self_attn,
+            layer_norm1,
+            mlp,
+            layer_norm2,
+        }
     }
 
     pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
         let residual = xs;
-        let xs = self.layer_norm1.forward(xs.clone());
+        let xs = self.layer_norm1.forward(residual.clone());
         let xs = self.self_attn.forward(xs, causal_attention_mask);
-        let xs = xs + residual;
+        let xs2 = xs.clone() + residual;
 
-        let residual = xs;
-        let xs = self.layer_norm2.forward(xs.clone())?;
-        let xs = self.mlp.forward(xs)?;
+        let residual = xs2;
+        let xs = self.layer_norm2.forward(xs.clone());
+        let xs = self.mlp.forward(xs);
         xs + residual
     }
 }
 
-#[derive(Debug)]
+#[derive(Module, Debug)]
 struct ClipEncoder<B: Backend> {
     layers: Vec<ClipEncoderLayer<B>>,
 }
@@ -301,7 +341,7 @@ pub struct ClipTextTransformer<B: Backend> {
 }
 
 impl<B: Backend> ClipTextTransformer<B> {
-    pub fn new(device: &Backend::Device, c: &Config) -> Self {
+    pub fn new(device: &B::Device, c: &Config) -> Self {
         let embeddings = ClipTextEmbeddings::new(device, c);
         let encoder = ClipEncoder::new(c);
         let final_layer_norm = nn::LayerNormConfig::new(c.embed_dim).init();
@@ -313,7 +353,7 @@ impl<B: Backend> ClipTextTransformer<B> {
     }
 
     // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
-    fn build_causal_attention_mask(bsz: usize, seq_len: usize, device: &Backend::Device) -> Tensor<B, 3> {
+    fn build_causal_attention_mask(bsz: usize, seq_len: usize, device: &B::Device) -> Tensor<B, 2> {
         let mask = Tensor::full_device([bsz, seq_len, seq_len], f32::MIN, device);
         let mask = zero_lower_diagonal(mask); // zero out the lower diagonal
         let mask = mask.unsqueeze(); // expand mask
@@ -321,21 +361,21 @@ impl<B: Backend> ClipTextTransformer<B> {
     }
 
     fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
-        let [bsz, seq_len, _] = xs.dims();
-        let xs = self.embeddings.forward(xs)?;
-        let causal_attention_mask = Self::build_causal_attention_mask(bsz, seq_len, xs.device());
-        let xs = self.encoder.forward(xs, &causal_attention_mask)?;
+        let [bsz, seq_len] = xs.dims();
+        let xs = self.embeddings.forward(xs);
+        let causal_attention_mask = Self::build_causal_attention_mask(bsz, seq_len, &xs.device());
+        let xs = self.encoder.forward(xs, &causal_attention_mask);
         self.final_layer_norm.forward(xs)
     }
 }
 
-fn zero_lower_diagonal<B: Backend>(mut xs: Tensor<B, 3>) -> Tensor<B, 3> {
-    let [bsz, seq_len, _] = xs.dims();
-    for i in 0..seq_len {
-        for j in 0..i {
-            xs[[i, j, 0]] = 0.0; // Assuming the third dimension is the channel/diagonal dimension
-        }
-    }
+fn zero_lower_diagonal<B: Backend>(xs: Tensor<B, 3>) -> Tensor<B, 3> {
+    let [m, n, _] = xs.dims();
 
-    xs
+    // build an upper-triangle matrix
+    let upper_diag = (0..max(m, n))
+        .map(Tensor::<B, 2, Int>::diagonal)
+        .fold(Tensor::zeros([max(m, n); 2]), Tensor::add);
+
+    upper_diag.reshape([m, n]).unsqueeze().float().mul(xs)
 }
