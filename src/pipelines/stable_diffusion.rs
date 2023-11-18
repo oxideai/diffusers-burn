@@ -1,3 +1,4 @@
+use crate::schedulers::ddim;
 use crate::transformers::clip;
 
 #[derive(Clone, Debug)]
