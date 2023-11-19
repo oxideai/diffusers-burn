@@ -8,12 +8,17 @@ wgpu-backend = ["burn-wgpu"]
 
 [dependencies.burn-wgpu]
 package = "burn-wgpu"
-version = "0.10.0"
+version = "0.11.0"
 optional = true
 
 [dependencies]
 anyhow = "1.0.75"
-burn = "0.10.0"
-burn-tch = "0.10.0"
+burn = "0.11.0"
+burn-tch = "0.11.0"
 clap = { version = "4.4.7", features = ["derive"] }
 serde = { version = "1.0.192", features = ["derive"] }
+
+[patch.crates-io]
+burn = { git = "https://github.com/OxideAI/burn", branch = "feature/unsqueeze-dim" }
+burn-wgpu = { git = "https://github.com/OxideAI/burn", branch = "feature/unsqueeze-dim" }
+burn-tch = { git = "https://github.com/OxideAI/burn", branch = "feature/unsqueeze-dim" }

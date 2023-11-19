@@ -1,9 +1,40 @@
+use crate::models::resnet::{ResnetBlock2D, ResnetBlock2DConfig};
+use crate::utils::upsample::upsample_nearest2d;
+use burn::config::Config;
 use burn::module::Module;
 use burn::nn::conv::{Conv2d, Conv2dConfig};
 use burn::nn::PaddingConfig2d;
 use burn::tensor::backend::Backend;
 use burn::tensor::module::avg_pool2d;
 use burn::tensor::Tensor;
+
+#[derive(Config)]
+struct Downsample2DConfig {
+    in_channels: usize,
+    use_conv: bool,
+    out_channels: usize,
+    padding: usize,
+}
+
+impl Downsample2DConfig {
+    fn init<B: Backend>(&self) -> Downsample2D<B> {
+        let conv = if self.use_conv {
+            let conv = Conv2dConfig::new([self.in_channels, self.out_channels], [3, 3])
+                .with_stride([2, 2])
+                .with_padding(PaddingConfig2d::Explicit(self.padding, self.padding))
+                .init();
+
+            Some(conv)
+        } else {
+            None
+        };
+
+        Downsample2D {
+            conv,
+            padding: self.padding,
+        }
+    }
+}
 
 #[derive(Module, Debug)]
 struct Downsample2D<B: Backend> {
@@ -12,25 +43,6 @@ struct Downsample2D<B: Backend> {
 }
 
 impl<B: Backend> Downsample2D<B> {
-    fn new(
-        in_channels: usize,
-        use_conv: bool,
-        out_channels: usize,
-        padding: usize,
-    ) -> Self {
-        let conv = if use_conv {
-            let conv = Conv2dConfig::new([in_channels, out_channels], [3, 3])
-                .with_stride([2, 2])
-                .with_padding(PaddingConfig2d::Explicit(padding, padding))
-                .init();
-
-            Some(conv)
-        } else {
-            None
-        };
-        Downsample2D { conv, padding }
-    }
-
     fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
         match &self.conv {
             None => avg_pool2d(xs, [2, 2], [2, 2], [0, 0], true),
@@ -39,14 +51,30 @@ impl<B: Backend> Downsample2D<B> {
                     // TODO: Implement padding support
                     unimplemented!();
                     // let xs = xs;
-                        // .pad_with_zeros(D::Minus1, 0, 1)?
-                        // .pad_with_zeros(D::Minus2, 0, 1)?;
+                    // .pad_with_zeros(D::Minus1, 0, 1)?
+                    // .pad_with_zeros(D::Minus2, 0, 1)?;
                     // conv.forward(&xs)
                 } else {
                     conv.forward(xs)
                 }
             }
         }
+    }
+}
+
+#[derive(Config)]
+struct Upsample2DConfig {
+    in_channels: usize,
+    out_channels: usize,
+}
+
+impl Upsample2DConfig {
+    fn init<B: Backend>(&self) -> Upsample2D<B> {
+        let conv = Conv2dConfig::new([self.in_channels, self.out_channels], [3, 3])
+            .with_padding(PaddingConfig2d::Explicit(1, 1))
+            .init();
+
+        Upsample2D { conv }
     }
 }
 
@@ -57,20 +85,11 @@ struct Upsample2D<B: Backend> {
 }
 
 impl<B: Backend> Upsample2D<B> {
-    fn new(in_channels: usize, out_channels: usize) -> Self {
-        let conv = Conv2dConfig::new([in_channels, out_channels], [3, 3])
-            .with_padding(PaddingConfig2d::Explicit(1, 1))
-            .init();
-
-        Self { conv }
-    }
-
     fn forward(&self, xs: Tensor<B, 4>, size: Option<(usize, usize)>) -> Tensor<B, 4> {
         let xs = match size {
             None => {
                 let [_bsize, _channels, height, width] = xs.dims();
                 upsample_nearest2d(xs, 2 * height, 2 * width)
-                // xs.upsample_nearest2d(2 * height, 2 * width)
             }
             Some((h, w)) => upsample_nearest2d(xs, h, w),
         };
@@ -79,20 +98,10 @@ impl<B: Backend> Upsample2D<B> {
     }
 }
 
-
-pub fn upsample_nearest2d<B: Backend>(tensor: Tensor<B, 4>, height: usize, width: usize) -> Tensor<B, 4> {
-    let [batch_size, channels, _height, _width] = tensor.dims();
-    let tensor = tensor
-        .reshape([batch_size, channels, height, 1, width, 1])
-        .repeat(3, 2)
-        .repeat(5, 2)
-        .reshape([batch_size, channels, 2 * height, 2 * width]);
-
-    tensor
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Config, Debug)]
 pub struct DownEncoderBlock2DConfig {
+    pub in_channels: usize,
+    pub out_channels: usize,
     pub num_layers: usize,
     pub resnet_eps: f64,
     pub resnet_groups: usize,
@@ -101,22 +110,132 @@ pub struct DownEncoderBlock2DConfig {
     pub downsample_padding: usize,
 }
 
-impl Default for DownEncoderBlock2DConfig {
-    fn default() -> Self {
-        Self {
-            num_layers: 1,
-            resnet_eps: 1e-6,
-            resnet_groups: 32,
-            output_scale_factor: 1.,
-            add_downsample: true,
-            downsample_padding: 1,
+impl DownEncoderBlock2DConfig {
+    pub fn init<B: Backend>(&self) -> DownEncoderBlock2D<B> {
+        let resnets: Vec<_> = {
+            let conv_cfg = ResnetBlock2DConfig {
+                out_channels: Some(self.out_channels),
+                groups: self.resnet_groups,
+                groups_out: None,
+                eps: self.resnet_eps,
+                temb_channels: None,
+                use_in_shortcut: None,
+                output_scale_factor: self.output_scale_factor,
+            };
+            (0..(self.num_layers))
+                .map(|i| {
+                    let in_channels = if i == 0 {
+                        self.in_channels
+                    } else {
+                        self.out_channels
+                    };
+                    conv_cfg.init(in_channels)
+                })
+                .collect()
+        };
+
+        let downsampler = if self.add_downsample {
+            let downsample_cfg = Downsample2DConfig {
+                in_channels: self.out_channels,
+                use_conv: true,
+                out_channels: self.out_channels,
+                padding: self.downsample_padding,
+            };
+            Some(downsample_cfg.init())
+        } else {
+            None
+        };
+
+        DownEncoderBlock2D {
+            resnets,
+            downsampler,
         }
     }
 }
 
-#[derive(Debug)]
-pub struct DownEncoderBlock2D {
-    resnets: Vec<ResnetBlock2D>,
-    downsampler: Option<Downsample2D>,
-    pub config: DownEncoderBlock2DConfig,
+#[derive(Module, Debug)]
+pub struct DownEncoderBlock2D<B: Backend> {
+    resnets: Vec<ResnetBlock2D<B>>,
+    downsampler: Option<Downsample2D<B>>,
+}
+
+impl<B: Backend> DownEncoderBlock2D<B> {
+    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+        let mut xs = xs.clone();
+        for resnet in self.resnets.iter() {
+            xs = resnet.forward(xs, None)
+        }
+        match &self.downsampler {
+            Some(downsampler) => downsampler.forward(xs),
+            None => xs,
+        }
+    }
+}
+
+#[derive(Config, Debug)]
+pub struct UpDecoderBlock2DConfig {
+    pub out_channels: usize,
+    pub num_layers: usize,
+    pub resnet_eps: f64,
+    pub resnet_groups: usize,
+    pub output_scale_factor: f64,
+    pub add_upsample: bool,
+}
+
+impl UpDecoderBlock2DConfig {
+    pub fn init<B: Backend>(&self, in_channels: usize) -> UpDecoderBlock2D<B> {
+        let resnets: Vec<_> = {
+            let conv_cfg = ResnetBlock2DConfig {
+                out_channels: Some(self.out_channels),
+                groups: self.resnet_groups,
+                groups_out: None,
+                eps: self.resnet_eps,
+                temb_channels: None,
+                use_in_shortcut: None,
+                output_scale_factor: self.output_scale_factor,
+            };
+            (0..(self.num_layers))
+                .map(|i| {
+                    let in_channels = if i == 0 {
+                        in_channels
+                    } else {
+                        self.out_channels
+                    };
+                    conv_cfg.init(in_channels)
+                })
+                .collect()
+        };
+
+        let upsampler = if self.add_upsample {
+            let upsample = Upsample2DConfig {
+                in_channels: self.out_channels,
+                out_channels: self.out_channels,
+            };
+
+            Some(upsample.init())
+        } else {
+            None
+        };
+
+        UpDecoderBlock2D { resnets, upsampler }
+    }
+}
+
+#[derive(Module, Debug)]
+pub struct UpDecoderBlock2D<B: Backend> {
+    resnets: Vec<ResnetBlock2D<B>>,
+    upsampler: Option<Upsample2D<B>>,
+}
+
+impl<B: Backend> UpDecoderBlock2D<B> {
+    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+        let mut xs = xs.clone();
+        for resnet in self.resnets.iter() {
+            xs = resnet.forward(xs, None)
+        }
+        match &self.upsampler {
+            Some(upsampler) => upsampler.forward(xs, None),
+            None => xs,
+        }
+    }
 }

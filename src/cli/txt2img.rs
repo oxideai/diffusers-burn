@@ -1,15 +1,12 @@
 use anyhow::Result;
 use clap::Args;
 
-use burn::{
-    module::{Module},
-    tensor::{backend::Backend},
-};
+use burn::{module::Module, tensor::backend::Backend};
 
-#[cfg(feature = "wgpu-backend")]
-use burn_wgpu::{WgpuBackend, WgpuDevice, AutoGraphicsApi};
 #[cfg(not(feature = "wgpu-backend"))]
 use burn_tch::{TchBackend, TchDevice};
+#[cfg(feature = "wgpu-backend")]
+use burn_wgpu::{AutoGraphicsApi, WgpuBackend, WgpuDevice};
 use diffusers_burn::pipelines::stable_diffusion;
 
 const GUIDANCE_SCALE: f64 = 7.5;
@@ -85,7 +82,6 @@ pub struct Txt2ImgArgs {
 
     #[arg(long)]
     use_flash_attn: bool,
-
     // #[arg(long)]
     // use_f16: bool,
 }
@@ -98,11 +94,13 @@ enum StableDiffusionVersion {
 }
 
 pub fn handle_txt2img(args: &Txt2ImgArgs) -> Result<()> {
-    #[cfg(feature = "wgpu-backend")] {
+    #[cfg(feature = "wgpu-backend")]
+    {
         type Backend = WgpuBackend<AutoGraphicsApi, f32, i32>;
         let device = WgpuDevice::BestAvailable;
     }
-    #[cfg(not(feature = "wgpu-backend"))] {
+    #[cfg(not(feature = "wgpu-backend"))]
+    {
         type Backend = TchBackend<f32>;
         let device = TchDevice::Cpu;
     }

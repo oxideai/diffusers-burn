@@ -5,13 +5,17 @@
 //! Denoising Diffusion Implicit Models, K. He and al, 2015.
 //! https://arxiv.org/abs/1512.03385
 
+use crate::models::groupnorm::{GroupNorm, GroupNormConfig};
+use burn::config::Config;
+use burn::module::Module;
 use burn::nn::conv::{Conv2d, Conv2dConfig};
 use burn::nn::{Linear, LinearConfig, PaddingConfig2d};
+use burn::tensor::activation::silu;
 use burn::tensor::backend::Backend;
-use crate::models::groupnorm::{GroupNorm, GroupNormConfig};
+use burn::tensor::Tensor;
 
 /// Configuration for a ResNet block.
-#[derive(Debug, Clone, Copy)]
+#[derive(Config, Debug)]
 pub struct ResnetBlock2DConfig {
     /// The number of output channels, defaults to the number of input channels.
     pub out_channels: Option<usize>,
@@ -30,21 +34,45 @@ pub struct ResnetBlock2DConfig {
     pub output_scale_factor: f64,
 }
 
-impl Default for ResnetBlock2DConfig {
-    fn default() -> Self {
-        Self {
-            out_channels: None,
-            temb_channels: Some(512),
-            groups: 32,
-            groups_out: None,
-            eps: 1e-6,
-            use_in_shortcut: None,
-            output_scale_factor: 1.,
+impl ResnetBlock2DConfig {
+    pub fn init<B: Backend>(&self, in_channels: usize) -> ResnetBlock2D<B> {
+        let out_channels = self.out_channels.unwrap_or(in_channels);
+        let conv_cgf = Conv2dConfig::new([in_channels, out_channels], [3, 3])
+            .with_padding(PaddingConfig2d::Explicit(1, 1));
+        let norm1 = GroupNormConfig::new(self.groups, in_channels)
+            .with_epsilon(self.eps)
+            .init();
+        let conv1 = conv_cgf.init();
+        let groups_out = self.groups_out.unwrap_or(self.groups);
+        let norm2 = GroupNormConfig::new(groups_out, out_channels)
+            .with_epsilon(self.eps)
+            .init();
+        let conv2 = conv_cgf.init();
+        let use_in_shortcut = self.use_in_shortcut.unwrap_or(self != out_channels);
+        let conv_shortcut = if use_in_shortcut {
+            let conv_cfg = Conv2dConfig::new([self, out_channels], [1, 1]);
+            Some(conv_cfg.init())
+        } else {
+            None
+        };
+        let time_emb_proj = self.temb_channels.map(|temb_channels| {
+            let linear_cfg = LinearConfig::new(temb_channels, out_channels);
+            linear_cfg.init()
+        });
+
+        ResnetBlock2D {
+            norm1,
+            conv1,
+            norm2,
+            conv2,
+            time_emb_proj,
+            conv_shortcut,
+            output_scale_factor: self.output_scale_factor,
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Module, Debug)]
 pub struct ResnetBlock2D<B: Backend> {
     norm1: GroupNorm<B>,
     conv1: Conv2d<B>,
@@ -52,43 +80,28 @@ pub struct ResnetBlock2D<B: Backend> {
     conv2: Conv2d<B>,
     time_emb_proj: Option<Linear<B>>,
     conv_shortcut: Option<Conv2d<B>>,
-    config: ResnetBlock2DConfig,
+    output_scale_factor: f64,
 }
 
 impl<B: Backend> ResnetBlock2D<B> {
-    pub fn new(
-        in_channels: usize,
-        config: ResnetBlock2DConfig,
-    ) -> Self {
-        let out_channels = config.out_channels.unwrap_or(in_channels);
-        let conv_cgf = Conv2dConfig::new([in_channels, out_channels], [3, 3])
-            .with_padding(PaddingConfig2d::Explicit(1, 1));
-        let norm1 = GroupNormConfig::new(config.groups, in_channels)
-            .with_epsilon(config.eps)
-            .init();
-        let conv1 = conv_cgf.init();
-        let groups_out = config.groups_out.unwrap_or(config.groups);
-        let norm2 = GroupNormConfig::new(groups_out, out_channels)
-            .with_epsilon(config.eps)
-            .init();
-        let conv2 = conv_cgf.init();
-        let use_in_shortcut = config.use_in_shortcut.unwrap_or(in_channels != out_channels);
-        let conv_shortcut = if use_in_shortcut {
-            let conv_cfg = Conv2dConfig::new([in_channels, out_channels], [1, 1]);
-            Some(conv_cfg.init())
-        } else {
-            None
+    pub fn forward(&self, xs: Tensor<B, 4>, temb: Option<Tensor<B, 4>>) -> Tensor<B, 4> {
+        let shortcut_xs = match &self.conv_shortcut {
+            Some(conv_shortcut) => conv_shortcut.forward(xs),
+            None => xs.clone(),
         };
-        let time_emb_proj = config.temb_channels.map(|temb_channels| {
-            let linear_cfg = LinearConfig::new(temb_channels, out_channels);
-            // nn::linear(&vs / "time_emb_proj", temb_channels, out_channels, Default::default())
-        });
 
-        // let conv_shortcut = if use_in_shortcut {
-        //     let conv_cfg = nn::ConvConfig { stride: 1, padding: 0, ..Default::default() };
-        //     Some(nn::conv2d(&vs / "conv_shortcut", in_channels, out_channels, 1, conv_cfg))
-        // } else {
-        //     None
-        // };
+        let xs = self.norm1.forward(xs.clone());
+        let xs = self.conv1.forward(silu(xs));
+        let xs = match (temb, &self.time_emb_proj) {
+            (Some(temb), Some(time_emb_proj)) => time_emb_proj
+                .forward(silu(temb))
+                .unsqueeze_dim(4 - 1)
+                .unsqueeze_dim(4 - 1)
+                .add(xs),
+            _ => xs,
+        };
+        let xs = self.conv2.forward(silu(self.norm2.forward(xs)));
+
+        (shortcut_xs + xs)? / self.output_scale_factor
     }
 }
