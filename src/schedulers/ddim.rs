@@ -97,6 +97,23 @@ impl<B: Backend> DDIMScheduler<B> {
     pub fn timesteps(&self) -> &[usize] {
         &self.timesteps.as_slice()
     }
+
+    pub fn add_noise<const D: usize>(
+        &self,
+        original: &Tensor<B, D>,
+        noise: Tensor<B, D>,
+        timestep: usize,
+    ) -> Tensor<B, D> {
+        let timestep = if timestep >= self.alphas_cumprod.len() {
+            timestep - 1
+        } else {
+            timestep
+        };
+        let sqrt_alpha_prod = self.alphas_cumprod[timestep].sqrt();
+        let sqrt_one_minus_alpha_prod = (1.0 - self.alphas_cumprod[timestep]).sqrt();
+
+        original.mul_scalar(sqrt_alpha_prod) + noise.mul_scalar(sqrt_one_minus_alpha_prod)
+    }
 }
 
 fn scaled_linear_tensor<B: Backend>(
