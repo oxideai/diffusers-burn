@@ -1,4 +1,5 @@
 pub mod pipelines;
+pub mod schedulers;
 pub mod transformers;
 
 // pub fn add(left: usize, right: usize) -> usize {

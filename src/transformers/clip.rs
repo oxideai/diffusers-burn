@@ -5,7 +5,6 @@
 //!
 //! https://github.com/openai/CLIP
 
-use std::alloc::GlobalAlloc;
 use std::cmp::max;
 
 use burn::tensor::activation::softmax;
