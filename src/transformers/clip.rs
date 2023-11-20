@@ -5,11 +5,9 @@
 //!
 //! https://github.com/openai/CLIP
 
-use std::alloc::GlobalAlloc;
 use std::cmp::max;
 
 use burn::tensor::activation::softmax;
-use burn::tensor::ops::TensorOps;
 use burn::{
     module::Module,
     nn,
@@ -136,7 +134,7 @@ impl<B: Backend> ClipTextEmbeddings<B> {
         let position_embedding =
             nn::EmbeddingConfig::new(c.max_position_embeddings, c.embed_dim).init();
         let position_ids = Tensor::arange_device(0..c.max_position_embeddings, device)
-            .unsqueeze()
+            .unsqueeze_dim(0)
             .float();
 
         ClipTextEmbeddings {

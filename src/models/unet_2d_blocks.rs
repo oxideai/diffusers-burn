@@ -102,11 +102,17 @@ impl<B: Backend> Upsample2D<B> {
 pub struct DownEncoderBlock2DConfig {
     pub in_channels: usize,
     pub out_channels: usize,
+    #[config(default = 1)]
     pub num_layers: usize,
+    #[config(default = 1e-6)]
     pub resnet_eps: f64,
+    #[config(default = 32)]
     pub resnet_groups: usize,
+    #[config(default = 1.)]
     pub output_scale_factor: f64,
+    #[config(default = true)]
     pub add_downsample: bool,
+    #[config(default = 1)]
     pub downsample_padding: usize,
 }
 
@@ -175,25 +181,25 @@ impl<B: Backend> DownEncoderBlock2D<B> {
 #[derive(Config, Debug)]
 pub struct UpDecoderBlock2DConfig {
     pub out_channels: usize,
+    #[config(default = 1)]
     pub num_layers: usize,
+    #[config(default = 1e-6)]
     pub resnet_eps: f64,
+    #[config(default = 32)]
     pub resnet_groups: usize,
+    #[config(default = 1.)]
     pub output_scale_factor: f64,
+    #[config(default = true)]
     pub add_upsample: bool,
 }
 
 impl UpDecoderBlock2DConfig {
     pub fn init<B: Backend>(&self, in_channels: usize) -> UpDecoderBlock2D<B> {
         let resnets: Vec<_> = {
-            let conv_cfg = ResnetBlock2DConfig {
-                out_channels: Some(self.out_channels),
-                groups: self.resnet_groups,
-                groups_out: None,
-                eps: self.resnet_eps,
-                temb_channels: None,
-                use_in_shortcut: None,
-                output_scale_factor: self.output_scale_factor,
-            };
+            let conv_cfg = ResnetBlock2DConfig::new()
+                .with_groups(self.resnet_groups)
+                .with_eps(self.resnet_eps)
+                .with_output_scale_factor(self.output_scale_factor);
             (0..(self.num_layers))
                 .map(|i| {
                     let in_channels = if i == 0 {
@@ -238,4 +244,23 @@ impl<B: Backend> UpDecoderBlock2D<B> {
             None => xs,
         }
     }
+}
+
+#[derive(Config, Debug)]
+pub struct UNetMidBlock2DConfig {
+    #[config(default = 1)]
+    pub num_layers: usize,
+    #[config(default = 1e-6)]
+    pub resnet_eps: f64,
+    pub resnet_groups: Option<usize>,
+    pub attn_num_head_channels: Option<usize>,
+    // attention_type "default"
+    #[config(default = 1.)]
+    pub output_scale_factor: f64,
+}
+
+#[derive(Debug)]
+pub struct UNetMidBlock2D<B: Backend> {
+    resnet: ResnetBlock2D<B>,
+    // attn_resnets: Vec<(AttentionBlock, ResnetBlock2D<B>)>,
 }

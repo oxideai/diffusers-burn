@@ -21,9 +21,11 @@ pub struct ResnetBlock2DConfig {
     pub out_channels: Option<usize>,
     pub temb_channels: Option<usize>,
     /// The number of groups to use in group normalization.
+    #[config(default = 32)]
     pub groups: usize,
     pub groups_out: Option<usize>,
     /// The epsilon to be used in the group normalization operations.
+    #[config(default = 1e-6)]
     pub eps: f64,
     /// Whether to use a 2D convolution in the skip connection. When using None,
     /// such a convolution is used if the number of input channels is different from
@@ -31,6 +33,7 @@ pub struct ResnetBlock2DConfig {
     pub use_in_shortcut: Option<bool>,
     // non_linearity: silu
     /// The final output is scaled by dividing by this value.
+    #[config(default = 1.)]
     pub output_scale_factor: f64,
 }
 
@@ -48,9 +51,9 @@ impl ResnetBlock2DConfig {
             .with_epsilon(self.eps)
             .init();
         let conv2 = conv_cgf.init();
-        let use_in_shortcut = self.use_in_shortcut.unwrap_or(self != out_channels);
+        let use_in_shortcut = self.use_in_shortcut.unwrap_or(in_channels != out_channels);
         let conv_shortcut = if use_in_shortcut {
-            let conv_cfg = Conv2dConfig::new([self, out_channels], [1, 1]);
+            let conv_cfg = Conv2dConfig::new([in_channels, out_channels], [1, 1]);
             Some(conv_cfg.init())
         } else {
             None
@@ -86,22 +89,23 @@ pub struct ResnetBlock2D<B: Backend> {
 impl<B: Backend> ResnetBlock2D<B> {
     pub fn forward(&self, xs: Tensor<B, 4>, temb: Option<Tensor<B, 4>>) -> Tensor<B, 4> {
         let shortcut_xs = match &self.conv_shortcut {
-            Some(conv_shortcut) => conv_shortcut.forward(xs),
+            Some(conv_shortcut) => conv_shortcut.forward(xs.clone()),
             None => xs.clone(),
         };
 
         let xs = self.norm1.forward(xs.clone());
         let xs = self.conv1.forward(silu(xs));
-        let xs = match (temb, &self.time_emb_proj) {
-            (Some(temb), Some(time_emb_proj)) => time_emb_proj
-                .forward(silu(temb))
-                .unsqueeze_dim(4 - 1)
-                .unsqueeze_dim(4 - 1)
-                .add(xs),
-            _ => xs,
-        };
+        // TODO: time embedding
+        // let xs = match (temb, &self.time_emb_proj) {
+        //     (Some(temb), Some(time_emb_proj)) => time_emb_proj
+        //         .forward(silu(temb))
+        //         .unsqueeze_dim::<5>(4 - 1)
+        //         .unsqueeze_dim::<6>(5 - 1)
+        //         + xs.unsqueeze(),
+        //     _ => xs,
+        // };
         let xs = self.conv2.forward(silu(self.norm2.forward(xs)));
 
-        (shortcut_xs + xs)? / self.output_scale_factor
+        (shortcut_xs + xs) / self.output_scale_factor
     }
 }
