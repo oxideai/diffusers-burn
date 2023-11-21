@@ -14,6 +14,7 @@ optional = true
 [dependencies]
 anyhow = "1.0.75"
 burn = "0.10.0"
+burn-ndarray = "0.10.0"
 burn-tch = "0.10.0"
 clap = { version = "4.4.7", features = ["derive"] }
 serde = { version = "1.0.192", features = ["derive"] }
