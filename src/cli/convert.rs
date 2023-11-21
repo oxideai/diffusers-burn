@@ -11,6 +11,6 @@ pub struct ConvertArgs {
     output_dir: String,
 }
 
-pub fn handle_convert(args: &ConvertArgs) -> Result<()> {
+pub fn handle_convert(_args: &ConvertArgs) -> Result<()> {
     Ok(())
 }
