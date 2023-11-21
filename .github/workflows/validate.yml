@@ -1,0 +1,37 @@
+name: validate
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:    
+  rustfmt-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run cargo fmt
+      run: cargo fmt -- --check
+    # - name: Run cargo clippy
+      # run: cargo clippy -- -D warnings
+  macos-check:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Test
+      run: cargo test
+  ubuntu-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Test
+      run: cargo test
+  windows-check:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Test
+      run: cargo test
