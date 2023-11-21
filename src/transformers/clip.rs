@@ -215,7 +215,7 @@ struct ClipTextEmbeddings<B: Backend> {
 }
 
 impl<B: Backend> ClipTextEmbeddings<B> {
-    pub fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let token_embedding = self.token_embedding.forward(xs);
         let position_embedding = self
             .position_embedding
@@ -243,7 +243,7 @@ impl<B: Backend> ClipAttention<B> {
         // .contiguous() // TODO: Figure out if this is needed or if we can abstract over memory
     }
 
-    pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
         let [bsz, seq_len, embed_dim] = xs.dims();
         let query_states = self.q_proj.forward(xs.clone()) * self.scale;
         let proj_shape = [bsz * self.num_attention_heads, seq_len, self.head_dim];
@@ -308,7 +308,7 @@ struct ClipEncoderLayer<B: Backend> {
 }
 
 impl<B: Backend> ClipEncoderLayer<B> {
-    pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
         let residual = xs;
         let xs = self.layer_norm1.forward(residual.clone());
         let xs = self.self_attn.forward(xs, causal_attention_mask);
@@ -327,7 +327,7 @@ struct ClipEncoder<B: Backend> {
 }
 
 impl<B: Backend> ClipEncoder<B> {
-    pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
         let mut xs = xs;
         for layer in &self.layers {
             xs = layer.forward(xs, causal_attention_mask);
