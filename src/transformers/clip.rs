@@ -10,6 +10,7 @@ use std::f32::consts::SQRT_2;
 
 use burn::config::Config;
 use burn::tensor::activation::softmax;
+use burn::tensor::{Data, ElementConversion, Shape};
 use burn::{
     module::Module,
     nn,
@@ -243,34 +244,24 @@ impl<B: Backend> ClipAttention<B> {
         // .contiguous() // TODO: Figure out if this is needed or if we can abstract over memory
     }
 
-    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: Tensor<B, 4>) -> Tensor<B, 3> {
         let [bsz, seq_len, embed_dim] = xs.dims();
         let query_states = self.q_proj.forward(xs.clone()) * self.scale;
         let proj_shape = [bsz * self.num_attention_heads, seq_len, self.head_dim];
 
-        let query_states = self
-            .shape(query_states, seq_len, bsz)
-            .reshape(proj_shape)
-            .to_full_precision();
+        let query_states = self.shape(query_states, seq_len, bsz).reshape(proj_shape);
         let key_states = self
             .shape(self.k_proj.forward(xs.clone()), seq_len, bsz)
-            .reshape(proj_shape)
-            .to_full_precision();
+            .reshape(proj_shape);
         let value_states = self
             .shape(self.v_proj.forward(xs), seq_len, bsz)
-            .reshape(proj_shape)
-            .to_full_precision();
+            .reshape(proj_shape);
         let src_len = key_states.dims()[1];
         let attn_weights = query_states.matmul(key_states.swap_dims(1, 2));
 
         let attn_weights = attn_weights
             .reshape([bsz, self.num_attention_heads, seq_len, src_len])
-            .add(
-                causal_attention_mask
-                    .to_owned()
-                    .unsqueeze_dim(4)
-                    .to_full_precision(),
-            );
+            .add(causal_attention_mask);
         let attn_weights = attn_weights.reshape([bsz * self.num_attention_heads, seq_len, src_len]);
         let attn_weights = softmax(attn_weights, 3);
 
@@ -280,8 +271,7 @@ impl<B: Backend> ClipAttention<B> {
             .swap_dims(1, 2)
             .reshape([bsz, seq_len, embed_dim]);
 
-        self.out_proj
-            .forward(Tensor::from_full_precision(attn_output))
+        self.out_proj.forward(attn_output)
     }
 }
 
@@ -308,7 +298,7 @@ struct ClipEncoderLayer<B: Backend> {
 }
 
 impl<B: Backend> ClipEncoderLayer<B> {
-    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: Tensor<B, 4>) -> Tensor<B, 3> {
         let residual = xs;
         let xs = self.layer_norm1.forward(residual.clone());
         let xs = self.self_attn.forward(xs, causal_attention_mask);
@@ -327,10 +317,10 @@ struct ClipEncoder<B: Backend> {
 }
 
 impl<B: Backend> ClipEncoder<B> {
-    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: Tensor<B, 4>) -> Tensor<B, 3> {
         let mut xs = xs;
         for layer in &self.layers {
-            xs = layer.forward(xs, causal_attention_mask);
+            xs = layer.forward(xs, causal_attention_mask.clone());
         }
         xs
     }
@@ -346,18 +336,30 @@ pub struct ClipTextTransformer<B: Backend> {
 
 impl<B: Backend> ClipTextTransformer<B> {
     // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
-    fn build_causal_attention_mask(bsz: usize, seq_len: usize, device: &B::Device) -> Tensor<B, 2> {
-        let mask = Tensor::full_device([bsz, seq_len, seq_len], f32::MIN, device);
-        let mask = zero_lower_diagonal(mask); // zero out the lower diagonal
-                                              // expand mask
-        mask.unsqueeze()
+    fn build_causal_attention_mask(bsz: usize, seq_len: usize, device: &B::Device) -> Tensor<B, 4> {
+        let mut mask_vec = Vec::with_capacity(seq_len * seq_len);
+        for i in 0..seq_len {
+            for j in 0..seq_len {
+                if j > i {
+                    mask_vec.push(f32::MIN.elem());
+                } else {
+                    mask_vec.push(0f32.elem());
+                }
+            }
+        }
+
+        let mask_data: Data<B::FloatElem, 2> = Data::new(mask_vec, Shape::new([seq_len, seq_len]));
+        Tensor::from_data_device(mask_data, device)
+            .unsqueeze::<3>()
+            .repeat(0, bsz)
+            .unsqueeze_dim(1)
     }
 
     fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [bsz, seq_len] = xs.dims();
         let xs = self.embeddings.forward(xs);
         let causal_attention_mask = Self::build_causal_attention_mask(bsz, seq_len, &xs.device());
-        let xs = self.encoder.forward(xs, &causal_attention_mask);
+        let xs = self.encoder.forward(xs, causal_attention_mask);
         self.final_layer_norm.forward(xs)
     }
 }
@@ -410,5 +412,30 @@ mod tests {
 
         // TODO: Test contiguous
         assert_eq!(xs.shape(), Shape::from([2, 12, 77, 64]));
+    }
+
+    #[test]
+    fn build_causal_attention_mask() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
+        let device = <TestBackend as Backend>::Device::default();
+
+        let mask = ClipTextTransformer::<TestBackend>::build_causal_attention_mask(2, 3, &device);
+        assert_eq!(mask.shape(), Shape::from([2, 1, 3, 3]));
+
+        mask.to_data().assert_approx_eq(
+            &Data::from([
+                [[
+                    [0.0000e0, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0],
+                ]],
+                [[
+                    [0.0000e0, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0],
+                ]],
+            ]),
+            3,
+        );
     }
 }
