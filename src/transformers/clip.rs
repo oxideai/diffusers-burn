@@ -240,7 +240,7 @@ impl<B: Backend> ClipAttention<B> {
     fn shape(&self, xs: Tensor<B, 3>, seq_len: usize, bsz: usize) -> Tensor<B, 4> {
         xs.reshape([bsz, seq_len, self.num_attention_heads, self.head_dim])
             .swap_dims(1, 2)
-            // .contiguous() // TODO: Figure out if this is needed or if we can abstract over memory
+        // .contiguous() // TODO: Figure out if this is needed or if we can abstract over memory
     }
 
     pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
@@ -373,11 +373,10 @@ fn zero_lower_diagonal<B: Backend>(xs: Tensor<B, 3>) -> Tensor<B, 3> {
     upper_diag.reshape([m, n]).unsqueeze().float().mul(xs)
 }
 
-
 #[cfg(test)]
 mod tests {
-    use burn::tensor::{Data, Shape};
     use super::*;
+    use burn::tensor::{Data, Shape};
 
     #[test]
     fn test_init_text_embeddings() {
@@ -385,15 +384,16 @@ mod tests {
         let device = <TestBackend as Backend>::Device::default();
 
         let clip_config = ClipConfig::v1_5();
-        let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings(&device);
+        let text_embeddings: ClipTextEmbeddings<TestBackend> =
+            clip_config.init_text_embeddings(&device);
 
         assert_eq!(
             text_embeddings.position_ids.clone().int().to_data(),
             Data::from([[
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
-                24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-                46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
-                68, 69, 70, 71, 72, 73, 74, 75, 76
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+                44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+                65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76
             ]])
         );
 
