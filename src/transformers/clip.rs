@@ -349,7 +349,7 @@ impl<B: Backend> ClipTextTransformer<B> {
     fn build_causal_attention_mask(bsz: usize, seq_len: usize, device: &B::Device) -> Tensor<B, 2> {
         let mask = Tensor::full_device([bsz, seq_len, seq_len], f32::MIN, device);
         let mask = zero_lower_diagonal(mask); // zero out the lower diagonal
-         // expand mask
+                                              // expand mask
         mask.unsqueeze()
     }
 
