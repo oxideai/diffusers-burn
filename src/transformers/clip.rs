@@ -268,7 +268,7 @@ impl<B: Backend> ClipAttention<B> {
             .add(
                 causal_attention_mask
                     .to_owned()
-                    .unsqueeze::<4>()
+                    .unsqueeze_dim(4)
                     .to_full_precision(),
             );
         let attn_weights = attn_weights.reshape([bsz * self.num_attention_heads, seq_len, src_len]);
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_init_text_embeddings() {
-        type TestBackend = burn_ndarray::NdArrayBackend<f32>;
+        type TestBackend = burn_ndarray::NdArray<f32>;
 
         let clip_config = ClipConfig::v1_5();
         let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings();
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn test_clip_attention_shape() {
-        type TestBackend = burn_ndarray::NdArrayBackend<f32>;
+        type TestBackend = burn_ndarray::NdArray<f32>;
 
         let clip_config = ClipConfig::v1_5();
         let clip_attention: ClipAttention<TestBackend> = clip_config.init_attention();
