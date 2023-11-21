@@ -419,20 +419,22 @@ mod tests {
         type TestBackend = burn_ndarray::NdArray<f32>;
         let device = <TestBackend as Backend>::Device::default();
 
-        let mask = ClipTextTransformer::<TestBackend>::build_causal_attention_mask(2, 3, &device);
-        assert_eq!(mask.shape(), Shape::from([2, 1, 3, 3]));
+        let mask = ClipTextTransformer::<TestBackend>::build_causal_attention_mask(2, 4, &device);
+        assert_eq!(mask.shape(), Shape::from([2, 1, 4, 4]));
 
         mask.to_data().assert_approx_eq(
             &Data::from([
                 [[
-                    [0.0000e0, f32::MIN, f32::MIN],
-                    [0.0000e0, 0.0000e0, f32::MIN],
-                    [0.0000e0, 0.0000e0, 0.0000e0],
+                    [0.0000e0, f32::MIN, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0, 0.0000e0],
                 ]],
                 [[
-                    [0.0000e0, f32::MIN, f32::MIN],
-                    [0.0000e0, 0.0000e0, f32::MIN],
-                    [0.0000e0, 0.0000e0, 0.0000e0],
+                    [0.0000e0, f32::MIN, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0, 0.0000e0],
                 ]],
             ]),
             3,
