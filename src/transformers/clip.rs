@@ -114,11 +114,11 @@ impl ClipConfig {
         }
     }
 
-    fn init_text_embeddings<B: Backend>(&self, device: &B::Device) -> ClipTextEmbeddings<B> {
+    fn init_text_embeddings<B: Backend>(&self) -> ClipTextEmbeddings<B> {
         let token_embedding = nn::EmbeddingConfig::new(self.vocab_size, self.embed_dim).init();
         let position_embedding =
             nn::EmbeddingConfig::new(self.max_position_embeddings, self.embed_dim).init();
-        let position_ids = Tensor::arange_device(0..self.max_position_embeddings, device)
+        let position_ids = Tensor::arange(0..self.max_position_embeddings)
             .unsqueeze()
             // burn::Module does not support Int tensors yet, so we have to cast to Float
             .float();
@@ -192,8 +192,8 @@ impl ClipConfig {
         ClipEncoder { layers }
     }
 
-    pub fn init_text_transformer<B: Backend>(&self, device: &B::Device) -> ClipTextTransformer<B> {
-        let embeddings = self.init_text_embeddings(device);
+    pub fn init_text_transformer<B: Backend>(&self) -> ClipTextTransformer<B> {
+        let embeddings = self.init_text_embeddings();
         let encoder = self.init_encoder();
         let final_layer_norm = nn::LayerNormConfig::new(self.embed_dim).init();
         ClipTextTransformer {
@@ -381,11 +381,9 @@ mod tests {
     #[test]
     fn test_init_text_embeddings() {
         type TestBackend = burn_ndarray::NdArrayBackend<f32>;
-        let device = <TestBackend as Backend>::Device::default();
 
         let clip_config = ClipConfig::v1_5();
-        let text_embeddings: ClipTextEmbeddings<TestBackend> =
-            clip_config.init_text_embeddings(&device);
+        let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings();
 
         assert_eq!(
             text_embeddings.position_ids.clone().int().to_data(),
