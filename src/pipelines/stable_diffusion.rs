@@ -1,10 +1,10 @@
 use crate::transformers::clip;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct StableDiffusionConfig {
     pub width: i64,
     pub height: i64,
-    pub clip: clip::Config,
+    pub clip: clip::ClipConfig,
     // autoencoder: vae::AutoEncoderKLConfig,
     // unet: unet_2d::UNet2DConditionModelConfig,
     // scheduler: ddim::DDIMSchedulerConfig,
