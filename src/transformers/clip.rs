@@ -119,10 +119,7 @@ impl ClipConfig {
         let token_embedding = nn::EmbeddingConfig::new(self.vocab_size, self.embed_dim).init();
         let position_embedding =
             nn::EmbeddingConfig::new(self.max_position_embeddings, self.embed_dim).init();
-        let position_ids = Tensor::arange(0..self.max_position_embeddings)
-            .unsqueeze()
-            // burn::Module does not support Int tensors yet, so we have to cast to Float
-            .float();
+        let position_ids = Tensor::arange(0..self.max_position_embeddings).unsqueeze();
 
         ClipTextEmbeddings {
             token_embedding,
@@ -211,17 +208,13 @@ impl ClipConfig {
 struct ClipTextEmbeddings<B: Backend> {
     token_embedding: nn::Embedding<B>,
     position_embedding: nn::Embedding<B>,
-    // Should be Tensor<B, 2, Int> but burn::Module does not support Int tensors yet
-    position_ids: Tensor<B, 2>,
+    position_ids: Tensor<B, 2, Int>,
 }
 
 impl<B: Backend> ClipTextEmbeddings<B> {
     fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let token_embedding = self.token_embedding.forward(xs);
-        let position_embedding = self
-            .position_embedding
-            // case position_ids back to Float
-            .forward(self.position_ids.clone().int());
+        let position_embedding = self.position_embedding.forward(self.position_ids.clone());
         token_embedding + position_embedding
     }
 }
@@ -388,7 +381,7 @@ mod tests {
         let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings();
 
         assert_eq!(
-            text_embeddings.position_ids.clone().int().to_data(),
+            text_embeddings.position_ids.to_data(),
             Data::from([[
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
                 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
