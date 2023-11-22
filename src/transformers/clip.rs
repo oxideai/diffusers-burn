@@ -356,17 +356,6 @@ impl<B: Backend> ClipTextTransformer<B> {
     }
 }
 
-fn zero_lower_diagonal<B: Backend>(xs: Tensor<B, 3>) -> Tensor<B, 3> {
-    let [m, n, _] = xs.dims();
-
-    // build an upper-triangle matrix
-    let upper_diag = (0..max(m, n))
-        .map(Tensor::<B, 2, Int>::diagonal)
-        .fold(Tensor::zeros([max(m, n); 2]), Tensor::add);
-
-    upper_diag.reshape([m, n]).unsqueeze().float().mul(xs)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,7 +391,6 @@ mod tests {
         let xs = Tensor::<TestBackend, 3>::zeros([2, 77, 768]);
         let xs = clip_attention.shape(xs, 77, 2);
 
-        // TODO: Test contiguous
         assert_eq!(xs.shape(), Shape::from([2, 12, 77, 64]));
     }
 
