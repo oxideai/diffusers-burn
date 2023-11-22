@@ -7,9 +7,9 @@
 
 use std::f32::consts::SQRT_2;
 
+use crate::utils::build_causal_attention_mask;
 use burn::config::Config;
 use burn::tensor::activation::softmax;
-use burn::tensor::{Data, ElementConversion, Shape};
 use burn::{
     module::Module,
     nn,
@@ -326,30 +326,10 @@ pub struct ClipTextTransformer<B: Backend> {
 }
 
 impl<B: Backend> ClipTextTransformer<B> {
-    // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
-    fn build_causal_attention_mask(bsz: usize, seq_len: usize, device: &B::Device) -> Tensor<B, 4> {
-        let mut mask_vec = Vec::with_capacity(seq_len * seq_len);
-        for i in 0..seq_len {
-            for j in 0..seq_len {
-                if j > i {
-                    mask_vec.push(f32::MIN.elem());
-                } else {
-                    mask_vec.push(0f32.elem());
-                }
-            }
-        }
-
-        let mask_data: Data<B::FloatElem, 2> = Data::new(mask_vec, Shape::new([seq_len, seq_len]));
-        Tensor::from_data_device(mask_data, device)
-            .unsqueeze::<3>()
-            .repeat(0, bsz)
-            .unsqueeze_dim(1)
-    }
-
     fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [bsz, seq_len] = xs.dims();
         let xs = self.embeddings.forward(xs);
-        let causal_attention_mask = Self::build_causal_attention_mask(bsz, seq_len, &xs.device());
+        let causal_attention_mask = build_causal_attention_mask(bsz, seq_len, &xs.device());
         let xs = self.encoder.forward(xs, causal_attention_mask);
         self.final_layer_norm.forward(xs)
     }
@@ -391,32 +371,5 @@ mod tests {
         let xs = clip_attention.shape(xs, 77, 2);
 
         assert_eq!(xs.shape(), Shape::from([2, 12, 77, 64]));
-    }
-
-    #[test]
-    fn build_causal_attention_mask() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-        let device = <TestBackend as Backend>::Device::default();
-
-        let mask = ClipTextTransformer::<TestBackend>::build_causal_attention_mask(2, 4, &device);
-        assert_eq!(mask.shape(), Shape::from([2, 1, 4, 4]));
-
-        mask.to_data().assert_approx_eq(
-            &Data::from([
-                [[
-                    [0.0000e0, f32::MIN, f32::MIN, f32::MIN],
-                    [0.0000e0, 0.0000e0, f32::MIN, f32::MIN],
-                    [0.0000e0, 0.0000e0, 0.0000e0, f32::MIN],
-                    [0.0000e0, 0.0000e0, 0.0000e0, 0.0000e0],
-                ]],
-                [[
-                    [0.0000e0, f32::MIN, f32::MIN, f32::MIN],
-                    [0.0000e0, 0.0000e0, f32::MIN, f32::MIN],
-                    [0.0000e0, 0.0000e0, 0.0000e0, f32::MIN],
-                    [0.0000e0, 0.0000e0, 0.0000e0, 0.0000e0],
-                ]],
-            ]),
-            3,
-        );
     }
 }
