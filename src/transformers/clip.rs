@@ -234,7 +234,6 @@ impl<B: Backend> ClipAttention<B> {
     fn shape(&self, xs: Tensor<B, 3>, seq_len: usize, bsz: usize) -> Tensor<B, 4> {
         xs.reshape([bsz, seq_len, self.num_attention_heads, self.head_dim])
             .swap_dims(1, 2)
-        // .contiguous() // TODO: Figure out if this is needed or if we can abstract over memory
     }
 
     fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: Tensor<B, 4>) -> Tensor<B, 3> {
