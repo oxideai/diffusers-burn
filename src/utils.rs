@@ -1,5 +1,5 @@
 use burn::tensor::backend::Backend;
-use burn::tensor::{Data, ElementConversion, Shape, Tensor};
+use burn::tensor::{Data, Element, ElementConversion, Numeric, Shape, Tensor};
 
 // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
 pub(crate) fn build_causal_attention_mask<B: Backend>(
@@ -23,6 +23,51 @@ pub(crate) fn build_causal_attention_mask<B: Backend>(
         .unsqueeze::<3>()
         .repeat(0, bsz)
         .unsqueeze_dim(1)
+}
+
+pub(crate) fn pad_with_zeros<B, const D: usize, K>(
+    tensor: Tensor<B, D, K>,
+    dim: usize,
+    left: usize,
+    right: usize,
+) -> Tensor<B, D, K>
+where
+    B: Backend,
+    K: Numeric<B>,
+    K::Elem: Element,
+{
+    return if left == 0 && right == 0 {
+        tensor.clone()
+    } else if left == 0 {
+        assert!(
+            dim < D,
+            "dim must be less than the number of dimensions of the tensor"
+        );
+        let mut dims = tensor.shape().dims.to_vec();
+        dims[dim] = right;
+        let right = Tensor::zeros_device(dims, &tensor.device());
+        Tensor::cat(vec![tensor, right], dim)
+    } else if right == 0 {
+        assert!(
+            dim < D,
+            "dim must be less than the number of dimensions of the tensor"
+        );
+        let mut dims = tensor.shape().dims.to_vec();
+        dims[dim] = left;
+        let left = Tensor::zeros_device(dims, &tensor.device());
+        Tensor::cat(vec![left, tensor], dim)
+    } else {
+        assert!(
+            dim < D,
+            "dim must be less than the number of dimensions of the tensor"
+        );
+        let mut dims = tensor.shape().dims.to_vec();
+        dims[dim] = left;
+        let left = Tensor::zeros_device(dims.clone(), &tensor.device());
+        dims[dim] = right;
+        let right = Tensor::zeros_device(dims, &tensor.device());
+        Tensor::cat(vec![left, tensor, right], dim)
+    };
 }
 
 #[cfg(test)]
@@ -56,5 +101,29 @@ mod tests {
             ]),
             3,
         );
+    }
+
+    #[test]
+    fn test_pad_with_zeros() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
+        let device = <TestBackend as Backend>::Device::default();
+
+        let tensor: Tensor<TestBackend, 3> = Tensor::from_data_device(
+            Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]),
+            &device,
+        );
+
+        let padded = pad_with_zeros(tensor, 0, 1, 2);
+
+        assert_eq!(padded.shape(), Shape::from([4, 2, 2]));
+        padded.to_data().assert_approx_eq(
+            &Data::from([
+                [[0.0000, 0.0000], [0.0000, 0.0000]],
+                [[1.6585, 0.4320], [-0.8701, -0.4649]],
+                [[0.0000, 0.0000], [0.0000, 0.0000]],
+                [[0.0000, 0.0000], [0.0000, 0.0000]],
+            ]),
+            3,
+        )
     }
 }
