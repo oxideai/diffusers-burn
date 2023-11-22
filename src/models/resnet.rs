@@ -16,7 +16,7 @@ use burn::tensor::Tensor;
 /// Configuration for a ResNet block.
 #[derive(Config, Debug)]
 pub struct ResnetBlock2DConfig {
-    in_channels: usize,
+    pub in_channels: usize,
     /// The number of output channels, defaults to the number of input channels.
     pub out_channels: Option<usize>,
     pub temb_channels: Option<usize>,
