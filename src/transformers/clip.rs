@@ -5,7 +5,6 @@
 //!
 //! https://github.com/openai/CLIP
 
-use std::cmp::max;
 use std::f32::consts::SQRT_2;
 
 use burn::config::Config;
