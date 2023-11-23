@@ -36,7 +36,7 @@ where
     K: Numeric<B>,
     K::Elem: Element,
 {
-    return if left == 0 && right == 0 {
+    if left == 0 && right == 0 {
         tensor.clone()
     } else if left == 0 {
         assert!(
@@ -67,7 +67,7 @@ where
         dims[dim] = right;
         let right = Tensor::zeros_device(dims, &tensor.device());
         Tensor::cat(vec![left, tensor, right], dim)
-    };
+    }
 }
 
 #[cfg(test)]
