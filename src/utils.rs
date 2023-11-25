@@ -2,7 +2,7 @@ use burn::tensor::backend::Backend;
 use burn::tensor::{Data, Element, ElementConversion, Numeric, Shape, Tensor};
 
 // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
-pub(crate) fn build_causal_attention_mask<B: Backend>(
+pub(crate) fn generate_causal_attention_mask<B: Backend>(
     bsz: usize,
     seq_len: usize,
     device: &B::Device,
@@ -70,18 +70,57 @@ where
     }
 }
 
+// TODO: Remove once https://github.com/Tracel-AI/burn/pull/998 is merged
+pub(crate) fn chunk<B, const D: usize, K>(
+    tensor: Tensor<B, D, K>,
+    chunks: usize,
+    dim: usize,
+) -> Vec<Tensor<B, D, K>>
+where
+    B: Backend,
+    K: Numeric<B>,
+    K::Elem: Element,
+{
+    if dim >= D {
+        panic!("dim must be less than the number of dimensions of the tensor");
+    }
+
+    let size = tensor.shape().dims[dim];
+    if size < chunks {
+        (0..size)
+            .map(|i| tensor.clone().narrow(dim, i, 1))
+            .collect::<Vec<_>>()
+    } else {
+        let chunk_size = size / chunks;
+        let cnt_additional = size % chunks;
+        let mut tensors = vec![];
+        let mut sum_chunk_size = 0;
+        for i in 0..chunks {
+            let chunk_size = if i < cnt_additional {
+                chunk_size + 1
+            } else {
+                chunk_size
+            };
+            let tensor = tensor.clone().narrow(dim, sum_chunk_size, chunk_size);
+            tensors.push(tensor);
+            sum_chunk_size += chunk_size
+        }
+        tensors
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use burn::tensor::backend::Backend;
-    use burn::tensor::{Data, Shape};
+    use burn::tensor::{Data, Int, Shape};
 
     #[test]
     fn test_build_causal_attention_mask() {
         type TestBackend = burn_ndarray::NdArray<f32>;
         let device = <TestBackend as Backend>::Device::default();
 
-        let mask = build_causal_attention_mask::<TestBackend>(2, 4, &device);
+        let mask = generate_causal_attention_mask::<TestBackend>(2, 4, &device);
         assert_eq!(mask.shape(), Shape::from([2, 1, 4, 4]));
 
         mask.to_data().assert_approx_eq(
@@ -106,12 +145,9 @@ mod tests {
     #[test]
     fn test_pad_with_zeros() {
         type TestBackend = burn_ndarray::NdArray<f32>;
-        let device = <TestBackend as Backend>::Device::default();
 
-        let tensor: Tensor<TestBackend, 3> = Tensor::from_data_device(
-            Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]),
-            &device,
-        );
+        let tensor: Tensor<TestBackend, 3> =
+            Tensor::from_data(Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]));
 
         let padded = pad_with_zeros(tensor, 0, 1, 2);
 
@@ -125,5 +161,88 @@ mod tests {
             ]),
             3,
         )
+    }
+
+    #[test]
+    fn test_chunk_odd_divisible() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
+
+        let tensor: Tensor<TestBackend, 1, Int> = Tensor::arange(0..11);
+        let tensors = chunk(tensor, 6, 0);
+
+        assert_eq!(tensors.len(), 6);
+
+        let expected = vec![
+            Data::from([0, 1]),
+            Data::from([2, 3]),
+            Data::from([4, 5]),
+            Data::from([6, 7]),
+            Data::from([8, 9]),
+            Data::from([10]),
+        ];
+
+        for (index, tensor) in tensors.iter().enumerate() {
+            assert_eq!(tensor.to_data(), expected[index]);
+        }
+    }
+
+    #[test]
+    fn test_chunk_even_divisible() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
+
+        let tensor: Tensor<TestBackend, 1, Int> = Tensor::arange(0..12);
+        let tensors = chunk(tensor, 6, 0);
+
+        assert_eq!(tensors.len(), 6);
+
+        let expected = vec![
+            Data::from([0, 1]),
+            Data::from([2, 3]),
+            Data::from([4, 5]),
+            Data::from([6, 7]),
+            Data::from([8, 9]),
+            Data::from([10, 11]),
+        ];
+
+        for (index, tensor) in tensors.iter().enumerate() {
+            assert_eq!(tensor.to_data(), expected[index]);
+        }
+    }
+
+    #[test]
+    fn test_chunk_not_divisible() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
+
+        let tensor: Tensor<TestBackend, 1, Int> = Tensor::arange(0..4);
+        let tensors = chunk(tensor, 6, 0);
+
+        assert_eq!(tensors.len(), 4);
+
+        let expected = vec![
+            Data::from([0]),
+            Data::from([1]),
+            Data::from([2]),
+            Data::from([3]),
+        ];
+
+        for (index, tensor) in tensors.iter().enumerate() {
+            assert_eq!(tensor.to_data(), expected[index]);
+        }
+    }
+
+    #[test]
+    fn test_chunk_multi_dimension() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
+
+        let tensor: Tensor<TestBackend, 2, Int> = Tensor::from_data(Data::from([[0, 1, 2, 3]]));
+        let tensors = chunk(tensor, 2, 1);
+
+        assert_eq!(tensors.len(), 2);
+
+        let expected = vec![Data::from([[0, 1]]), Data::from([[2, 3]])];
+
+        for (index, tensor) in tensors.iter().enumerate() {
+            assert_eq!(tensor.to_data(), expected[index]);
+        }
     }
 }
