@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use burn::{
     module::Module,
-    tensor::{backend::Backend, Data, ElementConversion, Shape, Tensor},
+    tensor::{backend::Backend, Data, Distribution, ElementConversion, Shape, Tensor},
 };
 
 use super::{BetaSchedule, PredictionType};
@@ -94,8 +94,67 @@ impl<B: Backend> DDIMScheduler<B> {
         }
     }
 
-    pub fn timesteps(&self) -> &[usize] {
-        &self.timesteps.as_slice()
+    // Perform a backward step
+    pub fn step<const D: usize>(
+        &self,
+        model_output: &Tensor<B, D>,
+        timestep: usize,
+        sample: &Tensor<B, D>,
+    ) -> Tensor<B, D> {
+        let timestep = if timestep >= self.alphas_cumprod.len() {
+            timestep - 1
+        } else {
+            timestep
+        };
+        let prev_timestep = if timestep > self.step_ratio {
+            timestep - self.step_ratio
+        } else {
+            0
+        };
+        let alpha_prod_t = self.alphas_cumprod[timestep];
+        let alpha_prod_t_prev = self.alphas_cumprod[prev_timestep];
+        let beta_prod_t = 1. - alpha_prod_t;
+        let beta_prod_t_prev = 1. - alpha_prod_t_prev;
+
+        let (pred_original_sample, pred_epsilon) = match self.config.prediction_type {
+            PredictionType::Epsilon => {
+                let pred_original_sample = sample.sub(model_output.mul_scalar(beta_prod_t.sqrt()))
+                    * (1. / alpha_prod_t.sqrt());
+                (pred_original_sample, model_output.clone())
+            }
+            PredictionType::VPrediction => {
+                let pred_original_sample = sample.mul_scalar(alpha_prod_t.sqrt())
+                    - model_output.mul_scalar(beta_prod_t.sqrt());
+                let pred_epsilon = model_output.mul_scalar(alpha_prod_t.sqrt())
+                    + sample.mul_scalar(beta_prod_t.sqrt());
+                (pred_original_sample, pred_epsilon)
+            }
+            PredictionType::Sample => {
+                let pred_original_sample = model_output.clone();
+                let pred_epsilon = sample.sub(pred_original_sample.mul_scalar(alpha_prod_t.sqrt()))
+                    * (1. / beta_prod_t.sqrt());
+                (pred_original_sample, pred_epsilon)
+            }
+        };
+
+        let variance = (beta_prod_t_prev / beta_prod_t) * (1. - alpha_prod_t / alpha_prod_t_prev);
+        let std_dev_t = self.config.eta * variance.sqrt();
+
+        let pred_sample_direction =
+            pred_epsilon.mul_scalar((1. - alpha_prod_t_prev - std_dev_t * std_dev_t).sqrt());
+        let prev_sample =
+            pred_original_sample.mul_scalar(alpha_prod_t_prev.sqrt()) + pred_sample_direction;
+
+        if self.config.eta > 0. {
+            prev_sample
+                + Tensor::random_device(
+                    prev_sample.shape(),
+                    Distribution::Normal(0f64, std_dev_t as f64),
+                    &prev_sample.device(),
+                )
+        } else {
+            prev_sample
+        }
     }
 
     pub fn add_noise<const D: usize>(
@@ -113,6 +172,14 @@ impl<B: Backend> DDIMScheduler<B> {
         let sqrt_one_minus_alpha_prod = (1.0 - self.alphas_cumprod[timestep]).sqrt();
 
         original.mul_scalar(sqrt_alpha_prod) + noise.mul_scalar(sqrt_one_minus_alpha_prod)
+    }
+
+    pub fn timesteps(&self) -> &[usize] {
+        &self.timesteps.as_slice()
+    }
+
+    pub fn init_noise_sigma(&self) -> f64 {
+        self.init_noise_sigma
     }
 }
 
@@ -152,8 +219,8 @@ fn linear_tensor<B: Backend>(
 /// Create a beta schedule that discretizes the given alpha_t_bar function, which defines the cumulative product of
 /// `(1-beta)` over time from `t = [0,1]`.
 ///
-/// Contains a function `alpha_bar` that takes an argument `t` and transforms it to the cumulative product of `(1-beta)`
-/// up to that part of the diffusion process.
+/// Contains a function `alpha_bar` that takes an argument `t` and transforms
+/// it to the cumulative product of `(1-beta)` up to that part of the diffusion process.
 fn squared_cos_tensor<B: Backend>(
     device: &B::Device,
     num_diffusion_timesteps: usize,
@@ -168,5 +235,6 @@ fn squared_cos_tensor<B: Backend>(
         let t2 = (i + 1) / num_diffusion_timesteps;
         betas.push((1.0 - alpha_bar(t2) / alpha_bar(t1)).min(max_beta).elem());
     }
+
     Tensor::from_data_device(Data::new(betas, Shape::new([betas.len()])), device)
 }
