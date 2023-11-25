@@ -97,9 +97,9 @@ impl<B: Backend> DDIMScheduler<B> {
     // Perform a backward step
     pub fn step<const D: usize>(
         &self,
-        model_output: &Tensor<B, D>,
+        model_output: Tensor<B, D>,
         timestep: usize,
-        sample: &Tensor<B, D>,
+        sample: Tensor<B, D>,
     ) -> Tensor<B, D> {
         let timestep = if timestep >= self.alphas_cumprod.len() {
             timestep - 1
@@ -118,22 +118,22 @@ impl<B: Backend> DDIMScheduler<B> {
 
         let (pred_original_sample, pred_epsilon) = match self.config.prediction_type {
             PredictionType::Epsilon => {
-                let pred_original_sample = sample.sub(model_output.mul_scalar(beta_prod_t.sqrt()))
+                let pred_original_sample = sample
+                    .sub(model_output.clone().mul_scalar(beta_prod_t.sqrt()))
                     * (1. / alpha_prod_t.sqrt());
-                (pred_original_sample, model_output.clone())
+                (pred_original_sample, model_output)
             }
             PredictionType::VPrediction => {
-                let pred_original_sample = sample.mul_scalar(alpha_prod_t.sqrt())
-                    - model_output.mul_scalar(beta_prod_t.sqrt());
+                let pred_original_sample = sample.clone().mul_scalar(alpha_prod_t.sqrt())
+                    - model_output.clone().mul_scalar(beta_prod_t.sqrt());
                 let pred_epsilon = model_output.mul_scalar(alpha_prod_t.sqrt())
                     + sample.mul_scalar(beta_prod_t.sqrt());
                 (pred_original_sample, pred_epsilon)
             }
             PredictionType::Sample => {
-                let pred_original_sample = model_output.clone();
-                let pred_epsilon = sample.sub(pred_original_sample.mul_scalar(alpha_prod_t.sqrt()))
+                let pred_epsilon = sample.sub(model_output.clone().mul_scalar(alpha_prod_t.sqrt()))
                     * (1. / beta_prod_t.sqrt());
-                (pred_original_sample, pred_epsilon)
+                (model_output, pred_epsilon)
             }
         };
 
@@ -146,7 +146,7 @@ impl<B: Backend> DDIMScheduler<B> {
             pred_original_sample.mul_scalar(alpha_prod_t_prev.sqrt()) + pred_sample_direction;
 
         if self.config.eta > 0. {
-            prev_sample
+            prev_sample.clone()
                 + Tensor::random_device(
                     prev_sample.shape(),
                     Distribution::Normal(0f64, std_dev_t as f64),
@@ -159,7 +159,7 @@ impl<B: Backend> DDIMScheduler<B> {
 
     pub fn add_noise<const D: usize>(
         &self,
-        original: &Tensor<B, D>,
+        original: Tensor<B, D>,
         noise: Tensor<B, D>,
         timestep: usize,
     ) -> Tensor<B, D> {
@@ -213,7 +213,9 @@ fn linear_tensor<B: Backend>(
         betas.push(cur.elem());
         cur += step_size;
     }
-    Tensor::from_data_device(Data::new(betas, Shape::new([betas.len()])), device)
+    let dims = [betas.len()];
+
+    Tensor::from_data_device(Data::new(betas, Shape::new(dims)), device)
 }
 
 /// Create a beta schedule that discretizes the given alpha_t_bar function, which defines the cumulative product of
@@ -230,11 +232,13 @@ fn squared_cos_tensor<B: Backend>(
         f64::cos((time_step as f64 + 0.008) / 1.008 * std::f64::consts::FRAC_PI_2).powi(2)
     };
     let mut betas = Vec::with_capacity(num_diffusion_timesteps);
+
     for i in 0..num_diffusion_timesteps {
         let t1 = i / num_diffusion_timesteps;
         let t2 = (i + 1) / num_diffusion_timesteps;
         betas.push((1.0 - alpha_bar(t2) / alpha_bar(t1)).min(max_beta).elem());
     }
+    let dims = [betas.len()];
 
-    Tensor::from_data_device(Data::new(betas, Shape::new([betas.len()])), device)
+    Tensor::from_data_device(Data::new(betas, Shape::new(dims)), device)
 }
