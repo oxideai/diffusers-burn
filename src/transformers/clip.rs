@@ -5,10 +5,11 @@
 //!
 //! https://github.com/openai/CLIP
 
-use std::cmp::max;
+use std::f32::consts::SQRT_2;
 
+use crate::utils::build_causal_attention_mask;
+use burn::config::Config;
 use burn::tensor::activation::softmax;
-use burn::tensor::ops::TensorOps;
 use burn::{
     module::Module,
     nn,
@@ -19,23 +20,25 @@ use burn::{
     },
 };
 
-#[derive(Module, Debug, Clone, Copy)]
+#[derive(Module, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum Activation {
-    QuickGelu,
     Gelu,
+    QuickGelu,
+    GeluErf,
 }
 
 impl Activation {
     pub fn forward<B: Backend, const D: usize>(&self, xs: Tensor<B, D>) -> Tensor<B, D> {
         match self {
-            Activation::QuickGelu => xs.clone() * sigmoid(xs * 1.702f64),
             Activation::Gelu => gelu(xs),
+            Activation::QuickGelu => xs.clone() * sigmoid(xs * 1.702f64),
+            Activation::GeluErf => (xs.clone() * (Tensor::erf(xs / SQRT_2) + 1)) / 2,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Config {
+#[derive(Config, Debug)]
+pub struct ClipConfig {
     vocab_size: usize,
     embed_dim: usize,       // aka config.hidden_size
     activation: Activation, // aka config.hidden_act
@@ -49,7 +52,7 @@ pub struct Config {
     projection_dim: usize,
 }
 
-impl Config {
+impl ClipConfig {
     // The config details can be found in the "text_config" section of this json file:
     // https://huggingface.co/openai/clip-vit-large-patch14/blob/main/config.json
     pub fn v1_5() -> Self {
@@ -111,32 +114,11 @@ impl Config {
         }
     }
 
-    pub fn ssd1b() -> Self {
-        Self::sdxl()
-    }
-
-    pub fn ssd1b2() -> Self {
-        Self::sdxl2()
-    }
-}
-
-// CLIP Text Model
-// https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py
-#[derive(Module, Debug)]
-struct ClipTextEmbeddings<B: Backend> {
-    token_embedding: nn::Embedding<B>,
-    position_embedding: nn::Embedding<B>,
-    position_ids: Tensor<B, 2>,
-}
-
-impl<B: Backend> ClipTextEmbeddings<B> {
-    fn new(device: &B::Device, c: &Config) -> Self {
-        let token_embedding = nn::EmbeddingConfig::new(c.vocab_size, c.embed_dim).init();
+    fn init_text_embeddings<B: Backend>(&self) -> ClipTextEmbeddings<B> {
+        let token_embedding = nn::EmbeddingConfig::new(self.vocab_size, self.embed_dim).init();
         let position_embedding =
-            nn::EmbeddingConfig::new(c.max_position_embeddings, c.embed_dim).init();
-        let position_ids = Tensor::arange_device(0..c.max_position_embeddings, device)
-            .unsqueeze()
-            .float();
+            nn::EmbeddingConfig::new(self.max_position_embeddings, self.embed_dim).init();
+        let position_ids = Tensor::arange(0..self.max_position_embeddings).unsqueeze();
 
         ClipTextEmbeddings {
             token_embedding,
@@ -145,38 +127,17 @@ impl<B: Backend> ClipTextEmbeddings<B> {
         }
     }
 
-    pub fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
-        let token_embedding = self.token_embedding.forward(xs);
-        let position_embedding = self
-            .position_embedding
-            .forward(self.position_ids.to_owned().int());
-        token_embedding + position_embedding
-    }
-}
-
-#[derive(Module, Debug)]
-struct ClipAttention<B: Backend> {
-    k_proj: nn::Linear<B>,
-    v_proj: nn::Linear<B>,
-    q_proj: nn::Linear<B>,
-    out_proj: nn::Linear<B>,
-    head_dim: usize,
-    scale: f64,
-    num_attention_heads: usize,
-}
-
-impl<B: Backend> ClipAttention<B> {
-    fn new(c: &Config) -> Self {
+    fn init_attention<B: Backend>(&self) -> ClipAttention<B> {
         assert_eq!(
-            c.embed_dim % c.num_attention_heads,
+            self.embed_dim % self.num_attention_heads,
             0,
             "embed_dim {} must be a multiple of num_attention_heads {}",
-            c.embed_dim,
-            c.num_attention_heads
+            self.embed_dim,
+            self.num_attention_heads
         );
 
-        let embed_dim = c.embed_dim;
-        let num_attention_heads = c.num_attention_heads;
+        let embed_dim = self.embed_dim;
+        let num_attention_heads = self.num_attention_heads;
         let k_proj = nn::LinearConfig::new(embed_dim, embed_dim)
             .with_bias(false)
             .init();
@@ -200,40 +161,98 @@ impl<B: Backend> ClipAttention<B> {
         }
     }
 
+    fn init_mlp<B: Backend>(&self) -> ClipMlp<B> {
+        let fc1 = nn::LinearConfig::new(self.embed_dim, self.intermediate_size).init();
+        let fc2 = nn::LinearConfig::new(self.intermediate_size, self.embed_dim).init();
+        ClipMlp {
+            fc1,
+            fc2,
+            activation: self.activation.clone(),
+        }
+    }
+
+    fn init_encoder_layer<B: Backend>(&self) -> ClipEncoderLayer<B> {
+        ClipEncoderLayer {
+            self_attn: self.init_attention(),
+            layer_norm1: nn::LayerNormConfig::new(self.embed_dim).init(),
+            mlp: self.init_mlp(),
+            layer_norm2: nn::LayerNormConfig::new(self.embed_dim).init(),
+        }
+    }
+
+    fn init_encoder<B: Backend>(&self) -> ClipEncoder<B> {
+        let mut layers: Vec<ClipEncoderLayer<B>> = Vec::new();
+        for _index in 0..self.num_hidden_layers {
+            let layer = self.init_encoder_layer();
+            layers.push(layer)
+        }
+        ClipEncoder { layers }
+    }
+
+    pub fn init_text_transformer<B: Backend>(&self) -> ClipTextTransformer<B> {
+        let embeddings = self.init_text_embeddings();
+        let encoder = self.init_encoder();
+        let final_layer_norm = nn::LayerNormConfig::new(self.embed_dim).init();
+        ClipTextTransformer {
+            embeddings,
+            encoder,
+            final_layer_norm,
+        }
+    }
+}
+
+// CLIP Text Model
+// https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py
+#[derive(Module, Debug)]
+struct ClipTextEmbeddings<B: Backend> {
+    token_embedding: nn::Embedding<B>,
+    position_embedding: nn::Embedding<B>,
+    position_ids: Tensor<B, 2, Int>,
+}
+
+impl<B: Backend> ClipTextEmbeddings<B> {
+    fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
+        let token_embedding = self.token_embedding.forward(xs);
+        let position_embedding = self.position_embedding.forward(self.position_ids.clone());
+        token_embedding + position_embedding
+    }
+}
+
+#[derive(Module, Debug)]
+struct ClipAttention<B: Backend> {
+    k_proj: nn::Linear<B>,
+    v_proj: nn::Linear<B>,
+    q_proj: nn::Linear<B>,
+    out_proj: nn::Linear<B>,
+    head_dim: usize,
+    scale: f64,
+    num_attention_heads: usize,
+}
+
+impl<B: Backend> ClipAttention<B> {
     fn shape(&self, xs: Tensor<B, 3>, seq_len: usize, bsz: usize) -> Tensor<B, 4> {
         xs.reshape([bsz, seq_len, self.num_attention_heads, self.head_dim])
             .swap_dims(1, 2)
-        // .contiguous() // TODO: Figure out if this is needed or if we can abstract over memory
     }
 
-    pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: Tensor<B, 4>) -> Tensor<B, 3> {
         let [bsz, seq_len, embed_dim] = xs.dims();
         let query_states = self.q_proj.forward(xs.clone()) * self.scale;
         let proj_shape = [bsz * self.num_attention_heads, seq_len, self.head_dim];
 
-        let query_states = self
-            .shape(query_states, seq_len, bsz)
-            .reshape(proj_shape)
-            .to_full_precision();
+        let query_states = self.shape(query_states, seq_len, bsz).reshape(proj_shape);
         let key_states = self
             .shape(self.k_proj.forward(xs.clone()), seq_len, bsz)
-            .reshape(proj_shape)
-            .to_full_precision();
+            .reshape(proj_shape);
         let value_states = self
             .shape(self.v_proj.forward(xs), seq_len, bsz)
-            .reshape(proj_shape)
-            .to_full_precision();
+            .reshape(proj_shape);
         let src_len = key_states.dims()[1];
         let attn_weights = query_states.matmul(key_states.swap_dims(1, 2));
 
         let attn_weights = attn_weights
             .reshape([bsz, self.num_attention_heads, seq_len, src_len])
-            .add(
-                causal_attention_mask
-                    .to_owned()
-                    .unsqueeze::<4>()
-                    .to_full_precision(),
-            );
+            .add(causal_attention_mask);
         let attn_weights = attn_weights.reshape([bsz * self.num_attention_heads, seq_len, src_len]);
         let attn_weights = softmax(attn_weights, 3);
 
@@ -243,8 +262,7 @@ impl<B: Backend> ClipAttention<B> {
             .swap_dims(1, 2)
             .reshape([bsz, seq_len, embed_dim]);
 
-        self.out_proj
-            .forward(Tensor::from_full_precision(attn_output))
+        self.out_proj.forward(attn_output)
     }
 }
 
@@ -256,16 +274,6 @@ struct ClipMlp<B: Backend> {
 }
 
 impl<B: Backend> ClipMlp<B> {
-    fn new(c: &Config) -> Self {
-        let fc1 = nn::LinearConfig::new(c.embed_dim, c.intermediate_size).init();
-        let fc2 = nn::LinearConfig::new(c.intermediate_size, c.embed_dim).init();
-        ClipMlp {
-            fc1,
-            fc2,
-            activation: c.activation,
-        }
-    }
-
     fn forward<const D: usize>(&self, xs: Tensor<B, D>) -> Tensor<B, D> {
         let xs = self.fc1.forward(xs);
         self.fc2.forward(self.activation.forward(xs))
@@ -281,20 +289,7 @@ struct ClipEncoderLayer<B: Backend> {
 }
 
 impl<B: Backend> ClipEncoderLayer<B> {
-    fn new(c: &Config) -> Self {
-        let self_attn = ClipAttention::new(c);
-        let layer_norm1 = nn::LayerNormConfig::new(c.embed_dim).init();
-        let mlp = ClipMlp::new(c);
-        let layer_norm2 = nn::LayerNormConfig::new(c.embed_dim).init();
-        ClipEncoderLayer {
-            self_attn,
-            layer_norm1,
-            mlp,
-            layer_norm2,
-        }
-    }
-
-    pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: Tensor<B, 4>) -> Tensor<B, 3> {
         let residual = xs;
         let xs = self.layer_norm1.forward(residual.clone());
         let xs = self.self_attn.forward(xs, causal_attention_mask);
@@ -313,19 +308,10 @@ struct ClipEncoder<B: Backend> {
 }
 
 impl<B: Backend> ClipEncoder<B> {
-    fn new(c: &Config) -> Self {
-        let mut layers: Vec<ClipEncoderLayer<B>> = Vec::new();
-        for _index in 0..c.num_hidden_layers {
-            let layer = ClipEncoderLayer::new(c);
-            layers.push(layer)
-        }
-        ClipEncoder { layers }
-    }
-
-    pub fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: &Tensor<B, 2>) -> Tensor<B, 3> {
+    fn forward(&self, xs: Tensor<B, 3>, causal_attention_mask: Tensor<B, 4>) -> Tensor<B, 3> {
         let mut xs = xs;
         for layer in &self.layers {
-            xs = layer.forward(xs, causal_attention_mask);
+            xs = layer.forward(xs, causal_attention_mask.clone());
         }
         xs
     }
@@ -340,41 +326,50 @@ pub struct ClipTextTransformer<B: Backend> {
 }
 
 impl<B: Backend> ClipTextTransformer<B> {
-    pub fn new(device: &B::Device, c: &Config) -> Self {
-        let embeddings = ClipTextEmbeddings::new(device, c);
-        let encoder = ClipEncoder::new(c);
-        let final_layer_norm = nn::LayerNormConfig::new(c.embed_dim).init();
-        ClipTextTransformer {
-            embeddings,
-            encoder,
-            final_layer_norm,
-        }
-    }
-
-    // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
-    fn build_causal_attention_mask(bsz: usize, seq_len: usize, device: &B::Device) -> Tensor<B, 2> {
-        let mask = Tensor::full_device([bsz, seq_len, seq_len], f32::MIN, device);
-        let mask = zero_lower_diagonal(mask); // zero out the lower diagonal
-        let mask = mask.unsqueeze(); // expand mask
-        mask
-    }
-
     fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [bsz, seq_len] = xs.dims();
         let xs = self.embeddings.forward(xs);
-        let causal_attention_mask = Self::build_causal_attention_mask(bsz, seq_len, &xs.device());
-        let xs = self.encoder.forward(xs, &causal_attention_mask);
+        let causal_attention_mask = build_causal_attention_mask(bsz, seq_len, &xs.device());
+        let xs = self.encoder.forward(xs, causal_attention_mask);
         self.final_layer_norm.forward(xs)
     }
 }
 
-fn zero_lower_diagonal<B: Backend>(xs: Tensor<B, 3>) -> Tensor<B, 3> {
-    let [m, n, _] = xs.dims();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use burn::tensor::{Data, Shape};
 
-    // build an upper-triangle matrix
-    let upper_diag = (0..max(m, n))
-        .map(Tensor::<B, 2, Int>::diagonal)
-        .fold(Tensor::zeros([max(m, n); 2]), Tensor::add);
+    #[test]
+    fn test_init_text_embeddings() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
 
-    upper_diag.reshape([m, n]).unsqueeze().float().mul(xs)
+        let clip_config = ClipConfig::v1_5();
+        let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings();
+
+        assert_eq!(
+            text_embeddings.position_ids.to_data(),
+            Data::from([[
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+                44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+                65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76
+            ]])
+        );
+
+        assert_eq!(text_embeddings.position_ids.shape(), Shape::from([1, 77]));
+    }
+
+    #[test]
+    fn test_clip_attention_shape() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
+
+        let clip_config = ClipConfig::v1_5();
+        let clip_attention: ClipAttention<TestBackend> = clip_config.init_attention();
+
+        let xs = Tensor::<TestBackend, 3>::zeros([2, 77, 768]);
+        let xs = clip_attention.shape(xs, 77, 2);
+
+        assert_eq!(xs.shape(), Shape::from([2, 12, 77, 64]));
+    }
 }

@@ -18,11 +18,6 @@ enum Commands {
         #[clap(flatten)]
         args: cli::convert::ConvertArgs,
     },
-    /// Sample from a fined tuned Stable Diffusion model and save the results
-    Sample {
-        #[clap(flatten)]
-        args: cli::txt2img::Txt2ImgArgs,
-    },
 }
 
 fn main() -> Result<()> {
@@ -31,9 +26,6 @@ fn main() -> Result<()> {
     match &cli.command {
         Commands::Convert { args } => {
             cli::convert::handle_convert(args)?;
-        }
-        Commands::Sample { args } => {
-            cli::txt2img::handle_txt2img(args)?;
         }
     }
 
