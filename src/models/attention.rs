@@ -136,7 +136,7 @@ impl CrossAttentionConfig {
 }
 
 impl<B: Backend> CrossAttention<B> {
-    fn reshape_heads_to_batch_dim<const D: usize>(&self, xs: Tensor<B, 3>) -> Tensor<B, 3> {
+    fn reshape_heads_to_batch_dim(&self, xs: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, seq_len, dim] = xs.dims();
         xs.reshape([batch_size, seq_len, self.n_heads, dim / self.n_heads])
             .swap_dims(1, 2)
@@ -188,13 +188,46 @@ impl<B: Backend> CrossAttention<B> {
         let output = Tensor::cat(hidden_states, 0);
         self.reshape_batch_dim_to_heads(output)
     }
+
+    fn attention(
+        &self,
+        query: Tensor<B, 3>,
+        key: Tensor<B, 3>,
+        value: Tensor<B, 3>,
+    ) -> Tensor<B, 3> {
+        let xs = query.matmul(key.swap_dims(3 - 1, 3 - 2) * self.scale);
+        let xs = softmax(xs, 3 - 1).matmul(value);
+
+        self.reshape_batch_dim_to_heads(xs)
+    }
+
+    pub fn forward(&self, xs: Tensor<B, 3>, context: Option<Tensor<B, 3>>) -> Tensor<B, 3> {
+        let query = self.query.forward(xs.clone());
+        let context = context.unwrap_or(xs);
+        let key = self.key.forward(context.clone());
+        let value = self.value.forward(context);
+
+        let query = self.reshape_heads_to_batch_dim(query);
+        let key = self.reshape_heads_to_batch_dim(key);
+        let value = self.reshape_heads_to_batch_dim(value);
+
+        let output_tensor = match self.slice_size {
+            None => self.attention(query, key, value),
+            Some(slice_size) if query.shape().dims[0] / slice_size <= 1 => {
+                self.attention(query, key, value)
+            }
+            Some(slice_size) => self.sliced_attention(query, key, value, slice_size),
+        };
+
+        self.output.forward(output_tensor)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use burn::module::{Param, ParamId};
-    use burn::tensor::{Data, Distribution, Shape};
+    use burn::tensor::{Data, Shape};
 
     #[test]
     fn test_geglu_tensor_shape_3() {
