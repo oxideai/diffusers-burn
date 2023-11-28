@@ -1,6 +1,5 @@
 //! Attention Based Building Blocks
 
-use crate::utils::chunk;
 use burn::config::Config;
 use burn::module::Module;
 use burn::nn::{Dropout, DropoutConfig, Linear, LinearConfig};
@@ -31,7 +30,7 @@ impl GeGluConfig {
 
 impl<B: Backend> GeGlu<B> {
     fn forward<const D: usize>(&self, xs: Tensor<B, D>) -> Tensor<B, D> {
-        let hidden_states_and_gate = chunk(self.proj.forward(xs), 2, D - 1);
+        let hidden_states_and_gate = self.proj.forward(xs).chunk(2, D - 1);
         hidden_states_and_gate[0].clone() * gelu(hidden_states_and_gate[1].clone())
     }
 }
@@ -146,9 +145,11 @@ impl<B: Backend> CrossAttention<B> {
 
     fn reshape_batch_dim_to_heads(&self, xs: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, seq_len, dim] = xs.dims();
-        xs.reshape([batch_size / self.n_heads, self.n_heads, seq_len, dim])
+        let output = xs
+            .reshape([batch_size / self.n_heads, self.n_heads, seq_len, dim])
             .swap_dims(1, 2)
-            .reshape([batch_size / self.n_heads, seq_len, dim * self.n_heads])
+            .reshape([batch_size / self.n_heads, seq_len, dim * self.n_heads]);
+        output
     }
 
     fn sliced_attention(
@@ -171,20 +172,21 @@ impl<B: Backend> CrossAttention<B> {
                 .matmul(
                     key.clone()
                         .slice([start_idx..end_idx, 0..key.shape().dims[1]])
-                        .transpose(),
+                        .swap_dims(3 - 1, 3 - 2)
+                        * self.scale,
                 );
 
-            let w = softmax(xs, 3 - 1);
-            let o = w.matmul(
+            let xs = softmax(xs, 3 - 1).matmul(
                 value
                     .clone()
                     .slice([start_idx..end_idx, 0..value.shape().dims[1]]),
             );
 
-            hidden_states.push(o);
+            hidden_states.push(xs);
         }
 
-        Tensor::cat(hidden_states, 0)
+        let output = Tensor::cat(hidden_states, 0);
+        self.reshape_batch_dim_to_heads(output)
     }
 }
 
@@ -192,7 +194,7 @@ impl<B: Backend> CrossAttention<B> {
 mod tests {
     use super::*;
     use burn::module::{Param, ParamId};
-    use burn::tensor::{Data, Shape};
+    use burn::tensor::{Data, Distribution, Shape};
 
     #[test]
     fn test_geglu_tensor_shape_3() {
@@ -285,5 +287,61 @@ mod tests {
             ]),
             1,
         );
+    }
+
+    #[test]
+    fn test_sliced_attention() {
+        type TestBackend = burn_ndarray::NdArray<f32>;
+
+        // create tensor of size [2, 4, 2]
+        let query: Tensor<TestBackend, 3> = Tensor::from_data(Data::from([
+            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+            [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
+            [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
+            [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
+        ]));
+        let key: Tensor<TestBackend, 3> = Tensor::from_data(Data::from([
+            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+            [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
+            [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
+            [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
+        ]));
+        let value: Tensor<TestBackend, 3> = Tensor::from_data(Data::from([
+            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+            [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
+            [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
+            [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
+        ]));
+
+        let cross_attention = CrossAttentionConfig {
+            query_dim: 320,
+            context_dim: None,
+            n_heads: 2,
+            head_dim: 40,
+            slice_size: Some(2),
+            dropout: 0.,
+        }
+        .init();
+
+        let output = cross_attention.sliced_attention(query, key, value, 2);
+
+        assert_eq!(output.shape(), Shape::from([2, 4, 4]));
+        output.into_data().assert_approx_eq(
+            &Data::from([
+                [
+                    [5.9201, 6.9201, 14.9951, 15.9951],
+                    [6.7557, 7.7557, 14.9986, 15.9986],
+                    [6.9363, 7.9363, 14.9996, 15.9996],
+                    [6.9824, 7.9824, 14.9999, 15.9999],
+                ],
+                [
+                    [23.0000, 24.0000, 31.0000, 32.0000],
+                    [23.0000, 24.0000, 31.0000, 32.0000],
+                    [23.0000, 24.0000, 31.0000, 32.0000],
+                    [23.0000, 24.0000, 31.0000, 32.0000],
+                ],
+            ]),
+            3,
+        )
     }
 }
