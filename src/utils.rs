@@ -74,7 +74,7 @@ where
 mod tests {
     use super::*;
     use burn::tensor::backend::Backend;
-    use burn::tensor::{Data, Int, Shape};
+    use burn::tensor::{Data, Shape};
 
     #[test]
     fn test_build_causal_attention_mask() {

@@ -235,6 +235,7 @@ pub struct BasicTransformerBlockConfig {
     sliced_attn_size: Option<usize>,
 }
 
+/// A basic Transformer block.
 #[derive(Module, Debug)]
 pub struct BasicTransformerBlock<B: Backend> {
     attn1: CrossAttention<B>,
@@ -303,6 +304,7 @@ pub struct SpatialTransformerConfig {
 //    Linear(nn::Linear<B>)
 //}
 
+/// Aka Transformer2DModel
 #[derive(Module, Debug)]
 pub struct SpatialTransformer<B: Backend> {
     norm: GroupNorm<B>,
@@ -365,6 +367,98 @@ impl<B: Backend> SpatialTransformer<B> {
             .swap_dims(1, 2);
 
         self.proj_out.forward(xs) + residual
+    }
+}
+
+#[derive(Config, Debug)]
+pub struct AttentionBlockConfig {
+    pub channels: usize,
+    pub n_head_channels: Option<usize>,
+    #[config(default = 32)]
+    pub n_groups: usize,
+    #[config(default = 1.)]
+    pub rescale_output_factor: f64,
+    #[config(default = 1e-5)]
+    pub eps: f64,
+}
+
+#[derive(Module, Debug)]
+pub struct AttentionBlock<B: Backend> {
+    group_norm: nn::GroupNorm<B>,
+    query: nn::Linear<B>,
+    key: nn::Linear<B>,
+    value: nn::Linear<B>,
+    proj_attn: nn::Linear<B>,
+    channels: usize,
+    n_heads: usize,
+    rescale_output_factor: f64,
+}
+
+impl AttentionBlockConfig {
+    fn init<B: Backend>(&self) -> AttentionBlock<B> {
+        let n_head_channels = self.n_head_channels.unwrap_or(self.channels);
+        let n_heads = self.channels / n_head_channels;
+        let group_norm = GroupNormConfig::new(self.n_groups, self.channels)
+            .with_epsilon(self.eps)
+            .init();
+        let query = LinearConfig::new(self.channels, self.channels).init();
+        let key = LinearConfig::new(self.channels, self.channels).init();
+        let value = LinearConfig::new(self.channels, self.channels).init();
+        let proj_attn = LinearConfig::new(self.channels, self.channels).init();
+
+        AttentionBlock {
+            group_norm,
+            query,
+            key,
+            value,
+            proj_attn,
+            channels: self.channels,
+            n_heads,
+            rescale_output_factor: self.rescale_output_factor,
+        }
+    }
+}
+
+impl<B: Backend> AttentionBlock<B> {
+    fn transpose_for_scores(&self, xs: Tensor<B, 3>) -> Tensor<B, 4> {
+        let [n_batch, t, h_times_d] = xs.dims();
+        xs.reshape([n_batch, t, self.n_heads, h_times_d / self.n_heads])
+            .swap_dims(1, 2)
+    }
+
+    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+        let residual = xs.clone();
+        let [n_batch, channel, height, width] = xs.dims();
+        let xs = self
+            .group_norm
+            .forward(xs)
+            .reshape([n_batch, channel, height * width])
+            .swap_dims(1, 2);
+
+        let query_proj = self.query.forward(xs.clone());
+        let key_proj = self.key.forward(xs.clone());
+        let value_proj = self.value.forward(xs.clone());
+
+        let query_states = self.transpose_for_scores(query_proj);
+        let key_states = self.transpose_for_scores(key_proj);
+        let value_states = self.transpose_for_scores(value_proj);
+
+        // scale is applied twice, hence the -0.25 here rather than -0.5.
+        // https://github.com/huggingface/diffusers/blob/d3d22ce5a894becb951eec03e663951b28d45135/src/diffusers/models/attention.py#L87
+        let scale = f64::powf(self.channels as f64 / self.n_heads as f64, -0.25);
+        let attention_scores = (query_states * scale).matmul(key_states.transpose() * scale);
+        let attention_probs = softmax(attention_scores, 4 - 1);
+
+        let xs = attention_probs.matmul(value_states);
+        let xs = xs.swap_dims(1, 2);
+        let xs: Tensor<B, 3> = xs.flatten(4 - 2, 4 - 1);
+        let xs = self
+            .proj_attn
+            .forward(xs)
+            .transpose()
+            .reshape([n_batch, channel, height, width]);
+
+        (xs + residual) / self.rescale_output_factor
     }
 }
 
