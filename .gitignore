@@ -15,5 +15,7 @@ Cargo.lock
 
 # Ignore macOS directory attributes
 .DS_Store
+
+# IDEs
 .idea
 .fleet
