@@ -2,7 +2,10 @@
 
 use burn::config::Config;
 use burn::module::Module;
-use burn::nn::{Dropout, DropoutConfig, Linear, LinearConfig};
+use burn::nn::{
+    self, Dropout, DropoutConfig, GroupNorm, GroupNormConfig, LayerNorm, LayerNormConfig,
+    LinearConfig,
+};
 use burn::tensor::activation::{gelu, softmax};
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
@@ -18,7 +21,7 @@ pub struct GeGluConfig {
 /// A variant of the gated linear unit activation function from https://arxiv.org/abs/2002.05202.
 #[derive(Module, Debug)]
 struct GeGlu<B: Backend> {
-    proj: Linear<B>,
+    proj: nn::Linear<B>,
 }
 
 impl GeGluConfig {
@@ -53,7 +56,7 @@ pub struct FeedForwardConfig {
 pub struct FeedForward<B: Backend> {
     geglu: GeGlu<B>,
     dropout: Dropout,
-    linear_outer: Linear<B>,
+    linear_outer: nn::Linear<B>,
 }
 
 impl FeedForwardConfig {
@@ -84,15 +87,15 @@ impl<B: Backend> FeedForward<B> {
 #[derive(Config)]
 pub struct CrossAttentionConfig {
     /// The number of channels in the query.
-    query_dim: usize,
+    d_query: usize,
     /// The number of channels in the context. If not given defaults to `query_dim`.
-    context_dim: Option<usize>,
+    d_context: Option<usize>,
     /// The number of heads to use for the multi-head attention.
     #[config(default = 8)]
     n_heads: usize,
     /// The number of channels in each head.
     #[config(default = 64)]
-    head_dim: usize,
+    d_head: usize,
     /// The size of the slices to use for the multi-head attention.
     slice_size: Option<usize>,
     #[config(default = 0.)]
@@ -102,10 +105,10 @@ pub struct CrossAttentionConfig {
 
 #[derive(Module, Debug)]
 pub struct CrossAttention<B: Backend> {
-    query: Linear<B>,
-    key: Linear<B>,
-    value: Linear<B>,
-    output: Linear<B>,
+    query: nn::Linear<B>,
+    key: nn::Linear<B>,
+    value: nn::Linear<B>,
+    output: nn::Linear<B>,
     n_heads: usize,
     scale: f64,
     slice_size: Option<usize>,
@@ -113,12 +116,12 @@ pub struct CrossAttention<B: Backend> {
 
 impl CrossAttentionConfig {
     pub fn init<B: Backend>(&self) -> CrossAttention<B> {
-        let inner_dim = self.head_dim * self.n_heads;
-        let context_dim = self.context_dim.unwrap_or(self.query_dim);
-        let scale = 1. / (self.head_dim as f64).sqrt();
+        let inner_dim = self.d_head * self.n_heads;
+        let context_dim = self.d_context.unwrap_or(self.d_query);
+        let scale = 1. / (self.d_head as f64).sqrt();
 
         CrossAttention {
-            query: LinearConfig::new(self.query_dim, inner_dim)
+            query: LinearConfig::new(self.d_query, inner_dim)
                 .with_bias(false)
                 .init(),
             key: LinearConfig::new(context_dim, inner_dim)
@@ -127,7 +130,7 @@ impl CrossAttentionConfig {
             value: LinearConfig::new(context_dim, inner_dim)
                 .with_bias(false)
                 .init(),
-            output: LinearConfig::new(inner_dim, self.query_dim).init(),
+            output: LinearConfig::new(inner_dim, self.d_query).init(),
             n_heads: self.n_heads,
             scale,
             slice_size: self.slice_size,
@@ -223,6 +226,148 @@ impl<B: Backend> CrossAttention<B> {
     }
 }
 
+#[derive(Config)]
+pub struct BasicTransformerBlockConfig {
+    d_model: usize,
+    d_context: Option<usize>,
+    n_heads: usize,
+    d_head: usize,
+    sliced_attn_size: Option<usize>,
+}
+
+#[derive(Module, Debug)]
+pub struct BasicTransformerBlock<B: Backend> {
+    attn1: CrossAttention<B>,
+    ff: FeedForward<B>,
+    attn2: CrossAttention<B>,
+    norm1: LayerNorm<B>,
+    norm2: LayerNorm<B>,
+    norm3: LayerNorm<B>,
+}
+
+impl BasicTransformerBlockConfig {
+    fn init<B: Backend>(&self) -> BasicTransformerBlock<B> {
+        let attn1 = CrossAttentionConfig::new(self.d_model)
+            .with_n_heads(self.n_heads)
+            .with_d_head(self.d_head)
+            .with_slice_size(self.sliced_attn_size)
+            .init();
+        let ff = FeedForwardConfig::new(self.d_model).init();
+        let attn2 = CrossAttentionConfig::new(self.d_model)
+            .with_d_context(self.d_context)
+            .with_n_heads(self.n_heads)
+            .with_d_head(self.d_head)
+            .with_slice_size(self.sliced_attn_size)
+            .init();
+        let norm1 = LayerNormConfig::new(self.d_model).init();
+        let norm2 = LayerNormConfig::new(self.d_model).init();
+        let norm3 = LayerNormConfig::new(self.d_model).init();
+
+        BasicTransformerBlock {
+            attn1,
+            ff,
+            attn2,
+            norm1,
+            norm2,
+            norm3,
+        }
+    }
+}
+
+impl<B: Backend> BasicTransformerBlock<B> {
+    pub fn forward(&self, xs: Tensor<B, 3>, context: Option<Tensor<B, 3>>) -> Tensor<B, 3> {
+        let xs = self.attn1.forward(self.norm1.forward(xs.clone()), None) + xs;
+        let xs = self.attn2.forward(self.norm2.forward(xs.clone()), context) + xs;
+        self.ff.forward(self.norm3.forward(xs.clone())) + xs
+    }
+}
+
+#[derive(Config, Debug)]
+pub struct SpatialTransformerConfig {
+    #[config(default = 1)]
+    pub depth: usize,
+    #[config(default = 32)]
+    pub n_groups: usize,
+    pub d_context: Option<usize>,
+    pub sliced_attn_size: Option<usize>,
+    //    #[config(default = false)]
+    //    pub use_linear_projection: bool,
+    pub in_channels: usize,
+    pub n_heads: usize,
+    pub d_head: usize,
+}
+
+//#[derive(Config, Debug)]
+//enum Proj<B: Backend> {
+//    Conv2d(nn::conv::Conv2d<B>),
+//    Linear(nn::Linear<B>)
+//}
+
+#[derive(Module, Debug)]
+pub struct SpatialTransformer<B: Backend> {
+    norm: GroupNorm<B>,
+    proj_in: nn::conv::Conv2d<B>,
+    transformer_blocks: Vec<BasicTransformerBlock<B>>,
+    proj_out: nn::conv::Conv2d<B>,
+}
+
+impl SpatialTransformerConfig {
+    fn init<B: Backend>(&self) -> SpatialTransformer<B> {
+        let d_inner = self.n_heads * self.d_head;
+        let norm = GroupNormConfig::new(self.n_groups, self.in_channels)
+            .with_epsilon(1e-6)
+            .init();
+        // let proj_in = if config.use_linear_projection {
+        let proj_in = nn::conv::Conv2dConfig::new([self.in_channels, d_inner], [1, 1]).init();
+
+        let mut transformer_blocks = vec![];
+        for _index in 0..self.depth {
+            let tb = BasicTransformerBlockConfig::new(d_inner, self.n_heads, self.d_head)
+                .with_d_context(self.d_context)
+                .with_sliced_attn_size(self.sliced_attn_size)
+                .init();
+
+            transformer_blocks.push(tb)
+        }
+
+        let proj_out = nn::conv::Conv2dConfig::new([d_inner, self.in_channels], [1, 1]).init();
+
+        SpatialTransformer {
+            norm,
+            proj_in,
+            transformer_blocks,
+            proj_out,
+        }
+    }
+}
+
+impl<B: Backend> SpatialTransformer<B> {
+    fn forward(&self, xs: Tensor<B, 4>, context: Option<Tensor<B, 3>>) -> Tensor<B, 4> {
+        let [n_batch, _n_channel, height, weight] = xs.dims();
+
+        let residual = xs.clone();
+        let xs = self.norm.forward(xs);
+        let xs = self.proj_in.forward(xs);
+        let d_inner = xs.shape().dims[1];
+        let xs = xs
+            .swap_dims(1, 2)
+            .transpose()
+            .reshape([n_batch, height * weight, d_inner]);
+
+        let mut xs = xs;
+        for block in self.transformer_blocks.iter() {
+            xs = block.forward(xs, context.clone())
+        }
+
+        let xs = xs
+            .reshape([n_batch, height, weight, d_inner])
+            .transpose()
+            .swap_dims(1, 2);
+
+        self.proj_out.forward(xs) + residual
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,7 +398,7 @@ mod tests {
         ]));
 
         let geglu = GeGlu {
-            proj: Linear {
+            proj: nn::Linear {
                 weight: Param::new(ParamId::new(), weight),
                 bias: Some(Param::new(ParamId::new(), bias)),
             },
@@ -301,7 +446,7 @@ mod tests {
         ]));
 
         let geglu = GeGlu {
-            proj: Linear {
+            proj: nn::Linear {
                 weight: Param::new(ParamId::new(), weight),
                 bias: Some(Param::new(ParamId::new(), bias)),
             },
@@ -346,15 +491,11 @@ mod tests {
             [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
         ]));
 
-        let cross_attention = CrossAttentionConfig {
-            query_dim: 320,
-            context_dim: None,
-            n_heads: 2,
-            head_dim: 40,
-            slice_size: Some(2),
-            dropout: 0.,
-        }
-        .init();
+        let cross_attention = CrossAttentionConfig::new(320)
+            .with_n_heads(2)
+            .with_d_head(40)
+            .with_slice_size(Some(2))
+            .init();
 
         let output = cross_attention.sliced_attention(query, key, value, 2);
 
