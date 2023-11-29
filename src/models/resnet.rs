@@ -117,12 +117,11 @@ impl<B: Backend> ResnetBlock2D<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestBackend;
     use burn::tensor::{Distribution, Shape};
 
     #[test]
     fn test_resnet_block_2d_no_temb() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let block = ResnetBlock2DConfig::new(128).init::<TestBackend>();
         let xs = Tensor::<TestBackend, 4>::random([2, 128, 64, 64], Distribution::Default);
         let output = block.forward(xs, None);
@@ -132,8 +131,6 @@ mod tests {
 
     #[test]
     fn test_resnet_block_2d_with_temb() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let block = ResnetBlock2DConfig::new(128).init::<TestBackend>();
         let xs = Tensor::<TestBackend, 4>::random([2, 128, 64, 64], Distribution::Default);
         let temb = Tensor::<TestBackend, 2>::random([2, 128], Distribution::Default);

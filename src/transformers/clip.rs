@@ -338,12 +338,11 @@ impl<B: Backend> ClipTextTransformer<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestBackend;
     use burn::tensor::{Data, Shape};
 
     #[test]
     fn test_init_text_embeddings() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let clip_config = ClipConfig::v1_5();
         let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings();
 
@@ -362,8 +361,6 @@ mod tests {
 
     #[test]
     fn test_clip_attention_shape() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let clip_config = ClipConfig::v1_5();
         let clip_attention: ClipAttention<TestBackend> = clip_config.init_attention();
 

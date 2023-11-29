@@ -20,30 +20,16 @@ jobs:
       run: cargo fmt -- --check
     # - name: Run cargo clippy
       # run: cargo clippy -- -D warnings
-  macos-check:
-    runs-on: macos-latest
+  check:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-13, ubuntu-latest, windows-latest]
+        feature: ['', 'wgpu', 'torch']
     steps:
     - uses: actions/checkout@v2
     - uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         rustflags: "" # Disable when we're ready
     - name: Test
-      run: cargo test
-  ubuntu-check:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rust-lang/setup-rust-toolchain@v1
-      with:
-        rustflags: "" # Disable when we're ready
-    - name: Test
-      run: cargo test
-  windows-check:
-    runs-on: windows-latest
-    steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rust-lang/setup-rust-toolchain@v1
-      with:
-        rustflags: "" # Disable when we're ready
-    - name: Test
-      run: cargo test
+      run: cargo test --features ${{ matrix.feature }}

@@ -73,12 +73,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use burn::tensor::backend::Backend;
-    use burn::tensor::{Data, Shape};
+    use crate::TestBackend;
+    use burn::tensor::{backend::Backend, Data, Shape};
 
     #[test]
     fn test_build_causal_attention_mask() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
         let device = <TestBackend as Backend>::Device::default();
 
         let mask = generate_causal_attention_mask::<TestBackend>(2, 4, &device);
@@ -105,8 +104,6 @@ mod tests {
 
     #[test]
     fn test_pad_with_zeros() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let tensor: Tensor<TestBackend, 3> =
             Tensor::from_data(Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]));
 

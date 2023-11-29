@@ -6,3 +6,15 @@ pub mod models;
 pub mod pipelines;
 pub mod transformers;
 pub mod utils;
+
+#[cfg(all(test, not(feature = "wgpu"), not(feature = "torch"),))]
+pub type TestBackend = burn_ndarray::NdArray<f32>;
+
+#[cfg(all(test, feature = "torch"))]
+pub type TestBackend = burn_tch::LibTorch<f32>;
+
+#[cfg(all(test, feature = "wgpu", not(target_os = "macos")))]
+pub type TestBackend = burn_wgpu::Wgpu<burn_wgpu::Vulkan, f32, i32>;
+
+#[cfg(all(test, feature = "wgpu", target_os = "macos"))]
+pub type TestBackend = burn_wgpu::Wgpu<burn_wgpu::Metal, f32, i32>;

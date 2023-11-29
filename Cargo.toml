@@ -4,10 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-wgpu-backend = ["burn-wgpu"]
+wgpu = ["burn-wgpu"]
+torch = ["burn-tch"]
 
 [dependencies.burn-wgpu]
 package = "burn-wgpu"
+version = "0.11.0"
+optional = true
+
+[dependencies.burn-tch]
+package = "burn-tch"
 version = "0.11.0"
 optional = true
 
@@ -15,7 +21,6 @@ optional = true
 anyhow = "1.0.75"
 burn = "0.11.0"
 burn-ndarray = "0.11.0"
-burn-tch = "0.11.0"
 clap = { version = "4.4.7", features = ["derive"] }
 serde = { version = "1.0.192", features = ["derive"] }
 

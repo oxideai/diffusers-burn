@@ -77,16 +77,13 @@ impl<B: Backend> Timesteps<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestBackend;
     use burn::tensor::{Data, Shape};
 
     #[test]
     fn test_timesteps_even_channels() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-        let device = <TestBackend as Backend>::Device::default();
-
         let timesteps = Timesteps::<TestBackend>::new(4, true, 0.);
-        let xs: Tensor<TestBackend, 1> =
-            Tensor::from_data_device(Data::from([1., 2., 3., 4.]), &device);
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4.]));
 
         let emb = timesteps.forward(xs);
 
@@ -104,12 +101,8 @@ mod tests {
 
     #[test]
     fn test_timesteps_odd_channels() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-        let device = <TestBackend as Backend>::Device::default();
-
         let timesteps = Timesteps::<TestBackend>::new(5, true, 0.);
-        let xs: Tensor<TestBackend, 1> =
-            Tensor::from_data_device(Data::from([1., 2., 3., 4., 5.]), &device);
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4., 5.]));
 
         let emb = timesteps.forward(xs);
 
