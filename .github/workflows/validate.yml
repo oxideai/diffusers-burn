@@ -20,16 +20,18 @@ jobs:
       run: cargo fmt -- --check
     # - name: Run cargo clippy
       # run: cargo clippy -- -D warnings
-  check:
+  check-std:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [macos-13, ubuntu-latest, windows-latest]
         rust: [stable]
-        feature: ['default', 'wgpu', 'torch']
+        feature: ['ndarray', 'wgpu', 'torch']
         include:
           - cache: stable
             rust: stable
+          - feature: 'ndarray-blas-accelerate'
+            os: macos-13
         exclude:
           # macos on CI does not have Metal GPU
           - os: macos-13

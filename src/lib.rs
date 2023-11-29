@@ -2,10 +2,14 @@
 //!
 //! This is a Rust port of Hugging Face's [diffusers](https://github.com/huggingface/diffusers) Python api using [Burn](https://github.com/burn-rs/burn)
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
 pub mod models;
 pub mod pipelines;
 pub mod transformers;
 pub mod utils;
+
+extern crate alloc;
 
 #[cfg(all(test, not(feature = "wgpu"), not(feature = "torch")))]
 pub type TestBackend = burn_ndarray::NdArray<f32>;

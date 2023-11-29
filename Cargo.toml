@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["burn/default", "std", "ndarray"]
+default = ["burn/default", "std"]
 
 std = ["burn/std"]
 
 ndarray = ["burn-ndarray", "burn/ndarray"]
+ndarray-no-std = ["burn-ndarray", "burn/ndarray-no-std"]
+ndarray-blas-accelerate = ["burn-ndarray", "burn/ndarray-blas-accelerate"]
+
 torch = ["burn-tch", "burn/tch"]
 wgpu = ["burn-wgpu", "burn/wgpu"]
 

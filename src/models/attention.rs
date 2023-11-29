@@ -9,6 +9,8 @@ use burn::nn::{
 use burn::tensor::activation::{gelu, softmax};
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
+use alloc::vec;
+use alloc::vec::Vec;
 
 #[derive(Config)]
 pub struct GeGluConfig {

@@ -5,6 +5,8 @@ use burn::nn::{Linear, LinearConfig};
 use burn::tensor::activation::silu;
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
+use core::marker::PhantomData;
+use alloc::vec;
 
 #[derive(Config, Debug)]
 pub struct TimestepEmbeddingConfig {
@@ -40,7 +42,7 @@ pub struct Timesteps<B: Backend> {
     num_channels: usize,
     flip_sin_to_cos: bool,
     downscale_freq_shift: f64,
-    _backend: std::marker::PhantomData<B>,
+    _backend: PhantomData<B>,
 }
 
 impl<B: Backend> Timesteps<B> {
@@ -49,7 +51,7 @@ impl<B: Backend> Timesteps<B> {
             num_channels,
             flip_sin_to_cos,
             downscale_freq_shift,
-            _backend: std::marker::PhantomData,
+            _backend: PhantomData,
         }
     }
 

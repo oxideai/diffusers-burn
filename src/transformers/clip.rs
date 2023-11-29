@@ -6,7 +6,9 @@
 //! https://github.com/openai/CLIP
 
 use core::f32::consts::SQRT_2;
-
+use alloc::string::String;
+use alloc::vec::Vec;
+use alloc::string::ToString;
 use crate::utils::generate_causal_attention_mask;
 use burn::config::Config;
 use burn::tensor::activation::softmax;
