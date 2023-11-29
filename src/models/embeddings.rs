@@ -1,10 +1,11 @@
 use crate::utils::pad_with_zeros;
 use burn::module::Module;
 use burn::nn::{Linear, LinearConfig};
+use burn::tensor::activation::silu;
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
 
-#[derive(Debug)]
+#[derive(Module, Debug)]
 pub struct TimestepEmbedding<B: Backend> {
     linear_1: Linear<B>,
     linear_2: Linear<B>,
@@ -16,6 +17,11 @@ impl<B: Backend> TimestepEmbedding<B> {
         let linear_1 = LinearConfig::new(channel, time_embed_dim).init();
         let linear_2 = LinearConfig::new(time_embed_dim, time_embed_dim).init();
         Self { linear_1, linear_2 }
+    }
+
+    fn forward(&self, xs: Tensor<B, 2>) -> Tensor<B, 2> {
+        let xs = silu(self.linear_1.forward(xs));
+        self.linear_2.forward(xs)
     }
 }
 
