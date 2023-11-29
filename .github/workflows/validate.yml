@@ -34,6 +34,9 @@ jobs:
           # macos on CI does not have Metal GPU
           - os: macos-13
             feature: 'wgpu'
+          # windows can have CPU Vulkan but Burn doesn't select CPU well yet
+          - os: windows-latest
+            feature: 'wgpu'
     steps:
     - name: checkout
       uses: actions/checkout@v2
