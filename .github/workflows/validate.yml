@@ -25,17 +25,28 @@ jobs:
     strategy:
       matrix:
         os: [macos-13, ubuntu-latest, windows-latest]
+        rust: [stable]
         feature: ['default', 'wgpu', 'torch']
+        include:
+          - cache: stable
+            rust: stable
         exclude:
           # macos on CI does not have Metal GPU
           - os: macos-13
             feature: 'wgpu'
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rust-lang/setup-rust-toolchain@v1
+    - name: checkout
+      uses: actions/checkout@v2
+    - name: install rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
+        toolchain: ${{ matrix.rust }}
         rustflags: "" # Disable when we're ready
-    - name: (linux) install mesa
+    - name: caching
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.feature }}-${{ hashFiles('**/Cargo.toml') }}
+    - name: (linux) install llvmpipe, lavapipe
       if: runner.os == 'Linux'
       run: |-
         sudo apt-get update -y -qq
