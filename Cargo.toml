@@ -18,9 +18,9 @@ wgpu = ["burn-wgpu", "burn/wgpu"]
 [dependencies]
 anyhow = "1.0.75"
 burn = { version = "0.11.0", default-features = false }
-burn-ndarray = { version = "0.11.0", optional = true }
-burn-tch = { version = "0.11.0", optional = true }
-burn-wgpu = { version = "0.11.0", optional = true }
+burn-ndarray = { version = "0.11.0", default-features = false, optional = true }
+burn-tch = { version = "0.11.0", default-features = false, optional = true }
+burn-wgpu = { version = "0.11.0", default-features = false, optional = true }
 clap = { version = "4.4.7", features = ["derive"] }
 serde = { version = "1.0.192", features = ["derive"] }
 
