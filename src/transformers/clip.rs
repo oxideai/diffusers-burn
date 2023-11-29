@@ -5,9 +5,10 @@
 //!
 //! https://github.com/openai/CLIP
 
-use std::f32::consts::SQRT_2;
-
 use crate::utils::generate_causal_attention_mask;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 use burn::config::Config;
 use burn::tensor::activation::softmax;
 use burn::{
@@ -19,6 +20,11 @@ use burn::{
         Int, Tensor,
     },
 };
+use core::f32::consts::SQRT_2;
+
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float;
 
 #[derive(Module, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum Activation {
@@ -338,12 +344,11 @@ impl<B: Backend> ClipTextTransformer<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestBackend;
     use burn::tensor::{Data, Shape};
 
     #[test]
     fn test_init_text_embeddings() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let clip_config = ClipConfig::v1_5();
         let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings();
 
@@ -362,8 +367,6 @@ mod tests {
 
     #[test]
     fn test_clip_attention_shape() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let clip_config = ClipConfig::v1_5();
         let clip_attention: ClipAttention<TestBackend> = clip_config.init_attention();
 
