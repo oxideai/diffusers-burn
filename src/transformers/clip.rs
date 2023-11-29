@@ -348,7 +348,6 @@ mod tests {
     use burn::tensor::{Data, Shape};
 
     #[test]
-    #[cfg(not(feature = "wgpu"))]
     fn test_init_text_embeddings() {
         let clip_config = ClipConfig::v1_5();
         let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings();
