@@ -5,7 +5,7 @@
 //!
 //! https://github.com/openai/CLIP
 
-use std::f32::consts::SQRT_2;
+use core::f32::consts::SQRT_2;
 
 use crate::utils::generate_causal_attention_mask;
 use burn::config::Config;

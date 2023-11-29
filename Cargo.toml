@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["burn/default", "ndarray"]
+default = ["burn/default", "std", "ndarray"]
 
 std = ["burn/std"]
 

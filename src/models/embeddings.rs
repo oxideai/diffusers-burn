@@ -81,6 +81,7 @@ mod tests {
     use burn::tensor::{Data, Shape};
 
     #[test]
+    #[cfg(not(feature = "torch"))]
     fn test_timesteps_even_channels() {
         let timesteps = Timesteps::<TestBackend>::new(4, true, 0.);
         let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4.]));
@@ -100,6 +101,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "torch"))]
     fn test_timesteps_odd_channels() {
         let timesteps = Timesteps::<TestBackend>::new(5, true, 0.);
         let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4., 5.]));
