@@ -7,7 +7,7 @@
 
 use std::f32::consts::SQRT_2;
 
-use crate::utils::build_causal_attention_mask;
+use crate::utils::generate_causal_attention_mask;
 use burn::config::Config;
 use burn::tensor::activation::softmax;
 use burn::{
@@ -329,7 +329,7 @@ impl<B: Backend> ClipTextTransformer<B> {
     fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [bsz, seq_len] = xs.dims();
         let xs = self.embeddings.forward(xs);
-        let causal_attention_mask = build_causal_attention_mask(bsz, seq_len, &xs.device());
+        let causal_attention_mask = generate_causal_attention_mask(bsz, seq_len, &xs.device());
         let xs = self.encoder.forward(xs, causal_attention_mask);
         self.final_layer_norm.forward(xs)
     }

@@ -20,7 +20,7 @@ clap = { version = "4.4.7", features = ["derive"] }
 serde = { version = "1.0.192", features = ["derive"] }
 
 [patch.crates-io]
-burn-wgpu = { git = "https://github.com/Tracel-AI/burn", rev = "be5bb33" }
-burn = { git = "https://github.com/Tracel-AI/burn", rev = "be5bb33" }
-burn-ndarray = { git = "https://github.com/Tracel-AI/burn", rev = "be5bb33" }
-burn-tch = { git = "https://github.com/Tracel-AI/burn", rev = "be5bb33" }
+burn-wgpu = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
+burn = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
+burn-ndarray = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
+burn-tch = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }

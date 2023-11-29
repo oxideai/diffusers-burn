@@ -2,7 +2,7 @@ use burn::tensor::backend::Backend;
 use burn::tensor::{Data, Element, ElementConversion, Numeric, Shape, Tensor};
 
 // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
-pub(crate) fn build_causal_attention_mask<B: Backend>(
+pub(crate) fn generate_causal_attention_mask<B: Backend>(
     bsz: usize,
     seq_len: usize,
     device: &B::Device,
@@ -81,7 +81,7 @@ mod tests {
         type TestBackend = burn_ndarray::NdArray<f32>;
         let device = <TestBackend as Backend>::Device::default();
 
-        let mask = build_causal_attention_mask::<TestBackend>(2, 4, &device);
+        let mask = generate_causal_attention_mask::<TestBackend>(2, 4, &device);
         assert_eq!(mask.shape(), Shape::from([2, 1, 4, 4]));
 
         mask.to_data().assert_approx_eq(
@@ -106,12 +106,9 @@ mod tests {
     #[test]
     fn test_pad_with_zeros() {
         type TestBackend = burn_ndarray::NdArray<f32>;
-        let device = <TestBackend as Backend>::Device::default();
 
-        let tensor: Tensor<TestBackend, 3> = Tensor::from_data_device(
-            Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]),
-            &device,
-        );
+        let tensor: Tensor<TestBackend, 3> =
+            Tensor::from_data(Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]));
 
         let padded = pad_with_zeros(tensor, 0, 1, 2);
 
