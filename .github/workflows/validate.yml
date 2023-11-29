@@ -31,5 +31,12 @@ jobs:
     - uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         rustflags: "" # Disable when we're ready
+    - name: install llvmpipe and lavapipe
+      if: runner.os == 'Linux'
+      run: |-
+        sudo apt-get update -y -qq
+        sudo add-apt-repository ppa:kisak/kisak-mesa -y
+        sudo apt-get update
+        sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
     - name: Test
       run: cargo test --features ${{ matrix.feature }}
