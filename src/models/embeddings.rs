@@ -1,12 +1,12 @@
 use crate::utils::pad_with_zeros;
 use burn::config::Config;
+use alloc::vec;
 use burn::module::Module;
 use burn::nn::{Linear, LinearConfig};
 use burn::tensor::activation::silu;
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
 use core::marker::PhantomData;
-use alloc::vec;
 
 #[derive(Config, Debug)]
 pub struct TimestepEmbeddingConfig {

@@ -26,13 +26,17 @@ jobs:
       matrix:
         os: [macos-13, ubuntu-latest, windows-latest]
         rust: [stable]
-        feature: ['ndarray', 'wgpu', 'torch']
+        feature: ['ndarray', 'wgpu', 'torch', 'ndarray-blas-accelerate']
         include:
           - cache: stable
             rust: stable
-          - feature: 'ndarray-blas-accelerate'
-            os: macos-13
         exclude:
+          # macOS feature only
+          - os: ubuntu-latest
+            feature: 'ndarray-blas-accelerate'
+          # macOS feature only
+          - os: windows-latest
+            feature: 'ndarray-blas-accelerate'
           # macos on CI does not have Metal GPU
           - os: macos-13
             feature: 'wgpu'
@@ -90,5 +94,5 @@ jobs:
     - name: (windows) install dxc
       if: runner.os == 'Windows'
       uses: napokue/setup-dxc@v1.1.0
-    - name: Test
+    - name: test
       run: cargo test --features ${{ matrix.feature }}

@@ -1,7 +1,7 @@
-use burn::tensor::backend::Backend;
-use burn::tensor::{Data, Element, ElementConversion, Numeric, Shape, Tensor};
 use alloc::vec;
 use alloc::vec::Vec;
+use burn::tensor::backend::Backend;
+use burn::tensor::{Data, Element, ElementConversion, Numeric, Shape, Tensor};
 
 // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
 pub(crate) fn generate_causal_attention_mask<B: Backend>(

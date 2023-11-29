@@ -5,11 +5,10 @@
 //!
 //! https://github.com/openai/CLIP
 
-use core::f32::consts::SQRT_2;
-use alloc::string::String;
-use alloc::vec::Vec;
-use alloc::string::ToString;
 use crate::utils::generate_causal_attention_mask;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 use burn::config::Config;
 use burn::tensor::activation::softmax;
 use burn::{
@@ -21,6 +20,7 @@ use burn::{
         Int, Tensor,
     },
 };
+use core::f32::consts::SQRT_2;
 
 #[derive(Module, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum Activation {
