@@ -465,13 +465,12 @@ impl<B: Backend> AttentionBlock<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestBackend;
     use burn::module::{Param, ParamId};
     use burn::tensor::{Data, Shape};
 
     #[test]
     fn test_geglu_tensor_shape_3() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let weight = Tensor::from_data(Data::from([
             [
                 0.1221, 2.0378, -0.1171, 1.3004, -0.9630, -0.3108, -1.3376, -1.0593,
@@ -524,8 +523,6 @@ mod tests {
 
     #[test]
     fn test_geglu_tensor_shape_2() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         let weight = Tensor::from_data(Data::from([
             [0.6054, 1.9322, 0.1445, 1.3004, -0.6853, -0.8947],
             [-0.3678, 0.4081, -1.9001, -1.5843, -0.9399, 0.1018],
@@ -563,8 +560,6 @@ mod tests {
 
     #[test]
     fn test_sliced_attention() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-
         // create tensor of size [2, 4, 2]
         let query: Tensor<TestBackend, 3> = Tensor::from_data(Data::from([
             [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
