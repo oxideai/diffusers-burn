@@ -7,7 +7,7 @@ pub mod pipelines;
 pub mod transformers;
 pub mod utils;
 
-#[cfg(all(test, not(feature = "wgpu"), not(feature = "torch"),))]
+#[cfg(all(test, not(feature = "wgpu"), not(feature = "torch")))]
 pub type TestBackend = burn_ndarray::NdArray<f32>;
 
 #[cfg(all(test, feature = "torch"))]
