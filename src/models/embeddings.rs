@@ -1,6 +1,6 @@
 use crate::utils::pad_with_zeros;
-use burn::config::Config;
 use alloc::vec;
+use burn::config::Config;
 use burn::module::Module;
 use burn::nn::{Linear, LinearConfig};
 use burn::tensor::activation::silu;
