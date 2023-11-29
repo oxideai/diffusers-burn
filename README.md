@@ -10,9 +10,9 @@ This crate can be used without the standard library (`#![no_std]`) with `alloc` 
 the default `std` feature.
 
 * `std` - enables the standard library. Enabled by default.
-* `wgpu` - uses ndarray as the backend. Enabled by default when none specified and std.
+* `wgpu` - uses ndarray as the backend. Enabled by default when none specified and `std`.
 * `ndarray` - uses ndarray as the backend.
-* `ndarray-no-std` - uses ndarray-no-std as the backend. Enabled by default when none and no_std.
+* `ndarray-no-std` - uses ndarray-no-std as the backend. Enabled by default when none and `#![no_std]`.
 * `ndarray-blas-accelerate` - uses ndarray with Accelerate framework (macOS only).
 * `torch` - uses torch as the backend.
 
