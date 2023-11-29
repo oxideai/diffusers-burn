@@ -100,7 +100,7 @@ jobs:
     - name: test
       run: cargo test --features ${{ matrix.feature }}
   check-no-std:
-    runs-on: macos-13
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         rust: [stable]
@@ -116,6 +116,7 @@ jobs:
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: ${{ matrix.rust }}
+        target: ${{ matrix.target }}
         rustflags: "" # Disable when we're ready
     - name: caching
       uses: Swatinem/rust-cache@v2
@@ -123,5 +124,5 @@ jobs:
         key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.feature }}-${{ hashFiles('**/Cargo.toml') }}
     - name: test
       run: cargo test --no-default-features --features ${{ matrix.feature }}
-    - name: build wasm
+    - name: build ${{ matrix.target }}
       run: cargo build --no-default-features --features ${{ matrix.feature }} --target ${{ matrix.target }}
