@@ -22,6 +22,10 @@ use burn::{
 };
 use core::f32::consts::SQRT_2;
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float;
+
 #[derive(Module, Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub enum Activation {
     Gelu,

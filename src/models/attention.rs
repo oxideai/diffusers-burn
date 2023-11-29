@@ -12,6 +12,10 @@ use burn::tensor::activation::{gelu, softmax};
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float;
+
 #[derive(Config)]
 pub struct GeGluConfig {
     /// The size of the input features.

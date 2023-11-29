@@ -8,6 +8,10 @@ use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
 use core::marker::PhantomData;
 
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float;
+
 #[derive(Config, Debug)]
 pub struct TimestepEmbeddingConfig {
     channel: usize,
