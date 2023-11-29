@@ -1,9 +1,16 @@
 use crate::utils::pad_with_zeros;
+use burn::config::Config;
 use burn::module::Module;
 use burn::nn::{Linear, LinearConfig};
 use burn::tensor::activation::silu;
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
+
+#[derive(Config, Debug)]
+pub struct TimestepEmbeddingConfig {
+    channel: usize,
+    time_embed_dim: usize,
+}
 
 #[derive(Module, Debug)]
 pub struct TimestepEmbedding<B: Backend> {
@@ -11,14 +18,17 @@ pub struct TimestepEmbedding<B: Backend> {
     linear_2: Linear<B>,
 }
 
-impl<B: Backend> TimestepEmbedding<B> {
-    // act_fn: "silu"
-    pub fn new(channel: usize, time_embed_dim: usize) -> Self {
-        let linear_1 = LinearConfig::new(channel, time_embed_dim).init();
-        let linear_2 = LinearConfig::new(time_embed_dim, time_embed_dim).init();
-        Self { linear_1, linear_2 }
+impl TimestepEmbeddingConfig {
+    /// Initialize a new [embedding](TimestepEmbedding) module.
+    /// Uses activating function: "silu".
+    pub fn init<B: Backend>(&self) -> TimestepEmbedding<B> {
+        let linear_1 = LinearConfig::new(self.channel, self.time_embed_dim).init();
+        let linear_2 = LinearConfig::new(self.time_embed_dim, self.time_embed_dim).init();
+        TimestepEmbedding { linear_1, linear_2 }
     }
+}
 
+impl<B: Backend> TimestepEmbedding<B> {
     fn forward(&self, xs: Tensor<B, 2>) -> Tensor<B, 2> {
         let xs = silu(self.linear_1.forward(xs));
         self.linear_2.forward(xs)
