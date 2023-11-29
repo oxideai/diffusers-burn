@@ -242,3 +242,38 @@ fn squared_cos_tensor<B: Backend>(
 
     Tensor::from_data_device(Data::new(betas, Shape::new(dims)), device)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::TestBackend;
+
+    #[test]
+    fn it_creates_linear_tensors() {
+        let expected = (0..10)
+            .map(|i| i as f32)
+            .map(<TestBackend as Backend>::FloatElem::from)
+            .collect::<Vec<_>>();
+        let actual =
+            linear_tensor::<TestBackend>(&<TestBackend as Backend>::Device::default(), 0., 10., 10)
+                .into_data()
+                .value;
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn it_creates_squared_linear_tensors() {
+        let expected = vec![2., 2.25, 2.5, 2.75];
+        let actual = scaled_linear_tensor::<TestBackend>(
+            &<TestBackend as Backend>::Device::default(),
+            4.,
+            9.,
+            4,
+        )
+        .into_data()
+        .value;
+
+        assert_eq!(expected, actual);
+    }
+}
