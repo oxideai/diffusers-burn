@@ -1,21 +1,43 @@
 use crate::utils::pad_with_zeros;
+use alloc::vec;
+use burn::config::Config;
 use burn::module::Module;
 use burn::nn::{Linear, LinearConfig};
+use burn::tensor::activation::silu;
 use burn::tensor::backend::Backend;
 use burn::tensor::Tensor;
+use core::marker::PhantomData;
 
-#[derive(Debug)]
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+use num_traits::Float;
+
+#[derive(Config, Debug)]
+pub struct TimestepEmbeddingConfig {
+    channel: usize,
+    time_embed_dim: usize,
+}
+
+#[derive(Module, Debug)]
 pub struct TimestepEmbedding<B: Backend> {
     linear_1: Linear<B>,
     linear_2: Linear<B>,
 }
 
+impl TimestepEmbeddingConfig {
+    /// Initialize a new [embedding](TimestepEmbedding) module.
+    /// Uses activating function: "silu".
+    pub fn init<B: Backend>(&self) -> TimestepEmbedding<B> {
+        let linear_1 = LinearConfig::new(self.channel, self.time_embed_dim).init();
+        let linear_2 = LinearConfig::new(self.time_embed_dim, self.time_embed_dim).init();
+        TimestepEmbedding { linear_1, linear_2 }
+    }
+}
+
 impl<B: Backend> TimestepEmbedding<B> {
-    // act_fn: "silu"
-    pub fn new(channel: usize, time_embed_dim: usize) -> Self {
-        let linear_1 = LinearConfig::new(channel, time_embed_dim).init();
-        let linear_2 = LinearConfig::new(time_embed_dim, time_embed_dim).init();
-        Self { linear_1, linear_2 }
+    fn forward(&self, xs: Tensor<B, 2>) -> Tensor<B, 2> {
+        let xs = silu(self.linear_1.forward(xs));
+        self.linear_2.forward(xs)
     }
 }
 
@@ -24,7 +46,7 @@ pub struct Timesteps<B: Backend> {
     num_channels: usize,
     flip_sin_to_cos: bool,
     downscale_freq_shift: f64,
-    _backend: std::marker::PhantomData<B>,
+    _backend: PhantomData<B>,
 }
 
 impl<B: Backend> Timesteps<B> {
@@ -33,7 +55,7 @@ impl<B: Backend> Timesteps<B> {
             num_channels,
             flip_sin_to_cos,
             downscale_freq_shift,
-            _backend: std::marker::PhantomData,
+            _backend: PhantomData,
         }
     }
 
@@ -61,16 +83,14 @@ impl<B: Backend> Timesteps<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestBackend;
     use burn::tensor::{Data, Shape};
 
     #[test]
+    #[cfg(not(feature = "torch"))]
     fn test_timesteps_even_channels() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-        let device = <TestBackend as Backend>::Device::default();
-
         let timesteps = Timesteps::<TestBackend>::new(4, true, 0.);
-        let xs: Tensor<TestBackend, 1> =
-            Tensor::from_data_device(Data::from([1., 2., 3., 4.]), &device);
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4.]));
 
         let emb = timesteps.forward(xs);
 
@@ -87,13 +107,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "torch"))]
     fn test_timesteps_odd_channels() {
-        type TestBackend = burn_ndarray::NdArray<f32>;
-        let device = <TestBackend as Backend>::Device::default();
-
         let timesteps = Timesteps::<TestBackend>::new(5, true, 0.);
-        let xs: Tensor<TestBackend, 1> =
-            Tensor::from_data_device(Data::from([1., 2., 3., 4., 5.]), &device);
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4., 5.]));
 
         let emb = timesteps.forward(xs);
 
