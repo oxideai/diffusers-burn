@@ -24,7 +24,7 @@ num-traits = { version = "0.2.17", default-features = false }
 serde = { version = "1.0.192", default-features = false, features = ["derive", "alloc"] }
 
 [patch.crates-io]
-burn-wgpu = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
-burn = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
-burn-ndarray = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
-burn-tch = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
+burn-wgpu = { git = "https://github.com/Tracel-AI/burn", rev = "f0c75aa7482512b7c9a05f70da095a181ad4638e" }
+burn = { git = "https://github.com/Tracel-AI/burn", rev = "f0c75aa7482512b7c9a05f70da095a181ad4638e" }
+burn-ndarray = { git = "https://github.com/Tracel-AI/burn", rev = "f0c75aa7482512b7c9a05f70da095a181ad4638e" }
+burn-tch = { git = "https://github.com/Tracel-AI/burn", rev = "f0c75aa7482512b7c9a05f70da095a181ad4638e" }
