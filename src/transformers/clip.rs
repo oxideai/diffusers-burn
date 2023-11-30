@@ -5,7 +5,6 @@
 //!
 //! https://github.com/openai/CLIP
 
-use crate::utils::generate_causal_attention_mask;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -332,10 +331,21 @@ pub struct ClipTextTransformer<B: Backend> {
 }
 
 impl<B: Backend> ClipTextTransformer<B> {
+    // https://github.com/huggingface/transformers/blob/674f750a57431222fa2832503a108df3badf1564/src/transformers/models/clip/modeling_clip.py#L678
+    fn generate_causal_attention_mask(
+        bsz: usize,
+        seq_len: usize,
+        device: &B::Device,
+    ) -> Tensor<B, 4> {
+        let mut mask: Tensor<B, 3> = Tensor::full_device([bsz, seq_len, seq_len], f32::MIN, device);
+        mask.triu(1).unsqueeze_dim(1)
+    }
+
     fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [bsz, seq_len] = xs.dims();
         let xs = self.embeddings.forward(xs);
-        let causal_attention_mask = generate_causal_attention_mask(bsz, seq_len, &xs.device());
+        let causal_attention_mask =
+            Self::generate_causal_attention_mask(bsz, seq_len, &xs.device());
         let xs = self.encoder.forward(xs, causal_attention_mask);
         self.final_layer_norm.forward(xs)
     }
@@ -374,5 +384,32 @@ mod tests {
         let xs = clip_attention.shape(xs, 77, 2);
 
         assert_eq!(xs.shape(), Shape::from([2, 12, 77, 64]));
+    }
+
+    #[test]
+    fn test_generate_causal_attention_mask() {
+        let device = <TestBackend as Backend>::Device::default();
+
+        let mask: Tensor<TestBackend, 4> =
+            ClipTextTransformer::generate_causal_attention_mask(2, 4, &device);
+        assert_eq!(mask.shape(), Shape::from([2, 1, 4, 4]));
+
+        mask.to_data().assert_approx_eq(
+            &Data::from([
+                [[
+                    [0.0000e0, f32::MIN, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0, 0.0000e0],
+                ]],
+                [[
+                    [0.0000e0, f32::MIN, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, f32::MIN, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0, f32::MIN],
+                    [0.0000e0, 0.0000e0, 0.0000e0, 0.0000e0],
+                ]],
+            ]),
+            3,
+        );
     }
 }
