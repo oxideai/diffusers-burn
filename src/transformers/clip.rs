@@ -337,7 +337,7 @@ impl<B: Backend> ClipTextTransformer<B> {
         seq_len: usize,
         device: &B::Device,
     ) -> Tensor<B, 4> {
-        let mut mask: Tensor<B, 3> = Tensor::full_device([bsz, seq_len, seq_len], f32::MIN, device);
+        let mask: Tensor<B, 3> = Tensor::full_device([bsz, seq_len, seq_len], f32::MIN, device);
         mask.triu(1).unsqueeze_dim(1)
     }
 
