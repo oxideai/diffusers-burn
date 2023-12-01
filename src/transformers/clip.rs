@@ -5,7 +5,6 @@
 //!
 //! https://github.com/openai/CLIP
 
-use crate::utils::generate_causal_attention_mask;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -344,6 +343,7 @@ impl<B: Backend> ClipTextTransformer<B> {
 
     fn forward(&self, xs: Tensor<B, 2, Int>) -> Tensor<B, 3> {
         let [bsz, seq_len] = xs.dims();
+        let xs = self.embeddings.forward(xs);
         let causal_attention_mask =
             Self::generate_causal_attention_mask(bsz, seq_len, &xs.device());
         let xs = self.encoder.forward(xs, causal_attention_mask);
