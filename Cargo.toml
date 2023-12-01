@@ -8,23 +8,17 @@ default = ["burn/default", "std"]
 
 std = ["burn/std"]
 
-ndarray = ["burn-ndarray", "burn/ndarray"]
-ndarray-no-std = ["burn-ndarray", "burn/ndarray-no-std"]
-ndarray-blas-accelerate = ["burn-ndarray", "burn/ndarray-blas-accelerate"]
+ndarray = ["burn/ndarray"]
+ndarray-no-std = ["burn/ndarray-no-std"]
+ndarray-blas-accelerate = ["burn/ndarray-blas-accelerate"]
 
-torch = ["burn-tch", "burn/tch"]
-wgpu = ["burn-wgpu", "burn/wgpu"]
+torch = ["burn/tch"]
+wgpu = ["burn/wgpu"]
 
 [dependencies]
 burn = { version = "0.11.0", default-features = false }
-burn-ndarray = { version = "0.11.0", default-features = false, optional = true }
-burn-tch = { version = "0.11.0", default-features = false, optional = true }
-burn-wgpu = { version = "0.11.0", default-features = false, optional = true }
 num-traits = { version = "0.2.17", default-features = false }
 serde = { version = "1.0.192", default-features = false, features = ["derive", "alloc"] }
 
 [patch.crates-io]
-burn-wgpu = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
-burn = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
-burn-ndarray = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
-burn-tch = { git = "https://github.com/Tracel-AI/burn", rev = "60c24430c6d4685032d9e351a537eded7da1a35c" }
+burn = { git = "https://github.com/Tracel-AI/burn", rev = "1f18cf4adff9682052c4919b8986968cabe85da4" }

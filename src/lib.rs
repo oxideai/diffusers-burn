@@ -6,20 +6,28 @@
 
 pub mod models;
 pub mod pipelines;
-pub mod schedulers;
 pub mod transformers;
 pub mod utils;
+
+#[cfg(all(test, not(feature = "wgpu"), not(feature = "torch")))]
+use burn::backend::ndarray;
+
+#[cfg(all(test, feature = "torch"))]
+use burn::backend::libtorch;
+
+#[cfg(all(test, feature = "wgpu"))]
+use burn::backend::wgpu;
 
 extern crate alloc;
 
 #[cfg(all(test, not(feature = "wgpu"), not(feature = "torch")))]
-pub type TestBackend = burn_ndarray::NdArray<f32>;
+pub type TestBackend = ndarray::NdArray<f32>;
 
 #[cfg(all(test, feature = "torch"))]
-pub type TestBackend = burn_tch::LibTorch<f32>;
+pub type TestBackend = libtorch::LibTorch<f32>;
 
 #[cfg(all(test, feature = "wgpu", not(target_os = "macos")))]
-pub type TestBackend = burn_wgpu::Wgpu<burn_wgpu::Vulkan, f32, i32>;
+pub type TestBackend = wgpu::Wgpu<wgpu::Vulkan, f32, i32>;
 
 #[cfg(all(test, feature = "wgpu", target_os = "macos"))]
-pub type TestBackend = burn_wgpu::Wgpu<burn_wgpu::Metal, f32, i32>;
+pub type TestBackend = wgpu::Wgpu<wgpu::Metal, f32, i32>;
