@@ -10,6 +10,8 @@ use burn::{
 
 use crate::utils::{pad_with_zeros, upsample_nearest2d};
 
+use super::resnet::{ResnetBlock2D, ResnetBlock2DConfig};
+
 #[derive(Config)]
 struct Downsample2DConfig {
     in_channels: usize,
@@ -95,6 +97,89 @@ impl<B: Backend> Upsample2D<B> {
         };
 
         self.conv.forward(xs)
+    }
+}
+
+#[derive(Config, Debug)]
+pub struct DownEncoderBlock2DConfig {
+    pub in_channels: usize,
+    pub out_channels: usize,
+    #[config(default = 1)]
+    pub num_layers: usize,
+    #[config(default = 1e-6)]
+    pub resnet_eps: f64,
+    #[config(default = 32)]
+    pub resnet_groups: usize,
+    #[config(default = 1.)]
+    pub output_scale_factor: f64,
+    #[config(default = true)]
+    pub add_downsample: bool,
+    #[config(default = 1)]
+    pub downsample_padding: usize,
+}
+
+#[derive(Module, Debug)]
+pub struct DownEncoderBlock2D<B: Backend> {
+    resnets: Vec<ResnetBlock2D<B>>,
+    downsampler: Option<Downsample2D<B>>,
+}
+
+impl DownEncoderBlock2DConfig {
+    pub fn init<B: Backend>(&self) -> DownEncoderBlock2D<B> {
+        let resnets: Vec<_> = {
+            (0..(self.num_layers))
+                .map(|i| {
+                    let in_channels = if i == 0 {
+                        self.in_channels
+                    } else {
+                        self.out_channels
+                    };
+
+                    let conv_cfg = ResnetBlock2DConfig {
+                        in_channels,
+                        out_channels: Some(self.out_channels),
+                        groups: self.resnet_groups,
+                        groups_out: None,
+                        eps: self.resnet_eps,
+                        temb_channels: None,
+                        use_in_shortcut: None,
+                        output_scale_factor: self.output_scale_factor,
+                    };
+
+                    conv_cfg.init()
+                })
+                .collect()
+        };
+
+        let downsampler = if self.add_downsample {
+            let downsample_cfg = Downsample2DConfig {
+                in_channels: self.out_channels,
+                use_conv: true,
+                out_channels: self.out_channels,
+                padding: self.downsample_padding,
+            };
+            Some(downsample_cfg.init())
+        } else {
+            None
+        };
+
+        DownEncoderBlock2D {
+            resnets,
+            downsampler,
+        }
+    }
+}
+
+impl<B: Backend> DownEncoderBlock2D<B> {
+    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+        let mut xs = xs.clone();
+        for resnet in self.resnets.iter() {
+            xs = resnet.forward(xs, None)
+        }
+        match &self.downsampler {
+            Some(downsampler) => downsampler.forward(xs),
+            None => xs,
+        }
     }
 }
 
