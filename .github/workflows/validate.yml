@@ -96,11 +96,15 @@ jobs:
     - name: test
       shell: bash
       run: |-
+        echo "::group::test: ${{ matrix.backend }}"
         cargo test --features ${{ matrix.backend }}
+        echo "::endgroup::"
 
         # test accelerate feature for ndarray on macOS
         if [ "${{ matrix.backend }}" = "ndarray" ] && [ "${{ runner.os }}" = "macOS" ]; then
+          echo "::group::test: ${{ matrix.backend }} with accelerate"
           cargo test --features ${{ matrix.backend }} accelerate
+          echo "::endgroup::"
         fi
   check-no-std:
     runs-on: ubuntu-latest
