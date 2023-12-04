@@ -27,26 +27,19 @@ jobs:
       matrix:
         os: [macos-13, ubuntu-latest, windows-latest]
         rust: [stable]
-        feature: ['ndarray', 'wgpu', 'torch', 'ndarray-blas-accelerate']
+        backend: ['ndarray', 'wgpu', 'torch']
         include:
           - cache: stable
             rust: stable
         exclude:
-          # macOS feature only
-          - os: ubuntu-latest
-            feature: 'ndarray-blas-accelerate'
-          # macOS feature only
-          - os: windows-latest
-            feature: 'ndarray-blas-accelerate'
-          # macos on CI does not have Metal GPU
           - os: macos-13
-            feature: 'wgpu'
+            backend: 'wgpu'
           # windows can have CPU Vulkan but Burn doesn't select CPU well yet
           - os: windows-latest
-            feature: 'wgpu'
+            backend: 'wgpu'
           # ubuntu is throwing SIGSEGV
           - os: ubuntu-latest
-            feature: 'wgpu'
+            backend: 'wgpu'
     steps:
     - name: checkout
       uses: actions/checkout@v2
@@ -55,12 +48,12 @@ jobs:
       with:
         cache: false
         toolchain: ${{ matrix.rust }}
-        matcher: ${{ matrix.os == 'ubuntu-latest' && matrix.rust == 'stable' && matrix.feature == 'ndarray' }}
+        matcher: ${{ matrix.os == 'ubuntu-latest' && matrix.rust == 'stable' && matrix.backend == 'ndarray' }}
         rustflags: "" # Disable when we're ready
     - name: caching
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.feature }}-${{ hashFiles('**/Cargo.toml') }}
+        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.backend }}-${{ hashFiles('**/Cargo.toml') }}
     - name: (linux) install llvmpipe, lavapipe
       if: runner.os == 'Linux'
       run: |-
@@ -101,14 +94,20 @@ jobs:
       if: runner.os == 'Windows'
       uses: napokue/setup-dxc@v1.1.0
     - name: test
-      run: cargo test --features ${{ matrix.feature }}
+      run: |-
+        cargo test --features ${{ matrix.feature }}
+
+        # test accelerate feature for ndarray on macOS
+        if [ "${{ matrix.backend }}" = "ndarray" ] && [ "${{ runner.os }}" = "macOS" ]; then
+          cargo test --features ${{ matrix.feature }} accelerate
+        fi
   check-no-std:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust: [stable]
         target: ['wasm32-unknown-unknown', 'thumbv7m-none-eabi']
-        feature: ['ndarray-no-std']
+        backend: ['ndarray']
         include:
           - cache: stable
             rust: stable
@@ -126,8 +125,8 @@ jobs:
     - name: caching
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.feature }}-${{ hashFiles('**/Cargo.toml') }}
+        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.backend }}-${{ hashFiles('**/Cargo.toml') }}
     - name: test
-      run: cargo test --no-default-features --features ${{ matrix.feature }}
+      run: cargo test --no-default-features --features ${{ matrix.backend }}
     - name: build ${{ matrix.target }}
-      run: cargo build --no-default-features --features ${{ matrix.feature }} --target ${{ matrix.target }}
+      run: cargo build --no-default-features --features ${{ matrix.backend }} --target ${{ matrix.target }}
