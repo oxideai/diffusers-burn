@@ -41,27 +41,27 @@ jobs:
           - os: ubuntu-latest
             backend: 'wgpu'
     steps:
-    - name: checkout
+    - name: Checkout
       uses: actions/checkout@v2
-    - name: install rust
+    - name: Install Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         cache: false
         toolchain: ${{ matrix.rust }}
         matcher: ${{ runner.os == 'Linux' && matrix.rust == 'stable' && matrix.backend == 'ndarray' }}
         rustflags: "" # Disable when we're ready
-    - name: caching
+    - name: Setup cache
       uses: Swatinem/rust-cache@v2
       with:
         key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.backend }}-${{ hashFiles('**/Cargo.toml') }}
-    - name: (linux) install llvmpipe, lavapipe
+    - name: (Linux) Install llvmpipe, lavapipe
       if: runner.os == 'Linux'
       run: |-
         sudo apt-get update -y -qq
         sudo add-apt-repository ppa:kisak/kisak-mesa -y
         sudo apt-get update
         sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
-    - name: (windows) install warp
+    - name: (Windows) Install warp
       if: runner.os == 'Windows'
       shell: bash
       run: |-
@@ -74,7 +74,7 @@ jobs:
 
         cp -v warp/d3d10warp.dll target/debug/
         cp -v warp/d3d10warp.dll target/debug/deps
-    - name: (windows) install mesa
+    - name: (Windows) Install mesa
       if: runner.os == 'Windows'
       shell: bash
       run: |-
@@ -90,19 +90,19 @@ jobs:
 
         echo "VK_DRIVER_FILES=$PWD/mesa/lvp_icd.x86_64.json" >> "$GITHUB_ENV"
         echo "GALLIUM_DRIVER=llvmpipe" >> "$GITHUB_ENV"
-    - name: (windows) install dxc
+    - name: (windows) Install dxc
       if: runner.os == 'Windows'
       uses: napokue/setup-dxc@v1.1.0
-    - name: test
+    - name: Run tests
       shell: bash
       run: |-
-        echo "::group::test: ${{ matrix.backend }}"
+        echo "::group::${{ matrix.backend }}"
         cargo test --features ${{ matrix.backend }}
         echo "::endgroup::"
 
         # test accelerate feature for ndarray on macOS
         if [ "${{ matrix.backend }}" = "ndarray" ] && [ "${{ runner.os }}" = "macOS" ]; then
-          echo "::group::test: ${{ matrix.backend }} with accelerate"
+          echo "::group::${{ matrix.backend }} with accelerate"
           cargo test --features ${{ matrix.backend }} accelerate
           echo "::endgroup::"
         fi
@@ -117,9 +117,9 @@ jobs:
           - cache: stable
             rust: stable
     steps:
-    - name: checkout
+    - name: Checkout
       uses: actions/checkout@v2
-    - name: install rust
+    - name: Install Rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: ${{ matrix.rust }}
@@ -127,11 +127,11 @@ jobs:
         cache: false
         matcher: false
         rustflags: "" # Disable when we're ready
-    - name: caching
+    - name: Setup cache
       uses: Swatinem/rust-cache@v2
       with:
         key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.backend }}-${{ hashFiles('**/Cargo.toml') }}
-    - name: test
+    - name: Run tests
       run: cargo test --no-default-features --features ${{ matrix.backend }}
-    - name: build ${{ matrix.target }}
+    - name: Build ${{ matrix.target }}
       run: cargo build --no-default-features --features ${{ matrix.backend }} --target ${{ matrix.target }}
