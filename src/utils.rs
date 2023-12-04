@@ -47,6 +47,21 @@ where
     }
 }
 
+pub(crate) fn upsample_nearest2d<B: Backend>(
+    tensor: Tensor<B, 4>,
+    height: usize,
+    width: usize,
+) -> Tensor<B, 4> {
+    let [batch_size, channels, _height, _width] = tensor.dims();
+    let tensor = tensor
+        .reshape([batch_size, channels, height, 1, width, 1])
+        .repeat(3, 2)
+        .repeat(5, 2)
+        .reshape([batch_size, channels, 2 * height, 2 * width]);
+
+    tensor
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +86,22 @@ mod tests {
                 [[0.0000, 0.0000], [0.0000, 0.0000]],
                 [[0.0000, 0.0000], [0.0000, 0.0000]],
             ]),
+            3,
+        )
+    }
+
+    #[test]
+    fn test_upsample_nearest2d() {
+        let tensor: Tensor<TestBackend, 4> =
+            Tensor::from_data(Data::from([[[[1., 2.], [3., 4.]]]]));
+        let output = upsample_nearest2d(tensor, 2, 2);
+        output.to_data().assert_approx_eq(
+            &Data::from([[[
+                [1., 1., 2., 2.],
+                [1., 1., 2., 2.],
+                [3., 3., 4., 4.],
+                [3., 3., 4., 4.],
+            ]]]),
             3,
         )
     }

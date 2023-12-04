@@ -8,7 +8,7 @@ use burn::{
     tensor::{backend::Backend, module::avg_pool2d, Tensor},
 };
 
-use crate::utils::pad_with_zeros;
+use crate::utils::{pad_with_zeros, upsample_nearest2d};
 
 #[derive(Config)]
 struct Downsample2DConfig {
@@ -59,6 +59,42 @@ impl<B: Backend> Downsample2D<B> {
             None => avg_pool2d(xs, [2, 2], [2, 2], [0, 0], true),
             Some(conv) => conv.forward(Self::pad_tensor(xs, self.padding)),
         }
+    }
+}
+
+#[derive(Config)]
+struct Upsample2DConfig {
+    in_channels: usize,
+    out_channels: usize,
+}
+
+// This does not support the conv-transpose mode.
+#[derive(Module, Debug)]
+struct Upsample2D<B: Backend> {
+    conv: nn::conv::Conv2d<B>,
+}
+
+impl Upsample2DConfig {
+    fn init<B: Backend>(&self) -> Upsample2D<B> {
+        let conv = nn::conv::Conv2dConfig::new([self.in_channels, self.out_channels], [3, 3])
+            .with_padding(nn::PaddingConfig2d::Explicit(1, 1))
+            .init();
+
+        Upsample2D { conv }
+    }
+}
+
+impl<B: Backend> Upsample2D<B> {
+    fn forward(&self, xs: Tensor<B, 4>, size: Option<(usize, usize)>) -> Tensor<B, 4> {
+        let xs = match size {
+            None => {
+                let [_bsize, _channels, height, width] = xs.dims();
+                upsample_nearest2d(xs, 2 * height, 2 * width)
+            }
+            Some((h, w)) => upsample_nearest2d(xs, h, w),
+        };
+
+        self.conv.forward(xs)
     }
 }
 
