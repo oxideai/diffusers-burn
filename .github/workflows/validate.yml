@@ -27,48 +27,41 @@ jobs:
       matrix:
         os: [macos-13, ubuntu-latest, windows-latest]
         rust: [stable]
-        feature: ['ndarray', 'wgpu', 'torch', 'ndarray-blas-accelerate']
+        backend: ['ndarray', 'wgpu', 'torch']
         include:
           - cache: stable
             rust: stable
         exclude:
-          # macOS feature only
-          - os: ubuntu-latest
-            feature: 'ndarray-blas-accelerate'
-          # macOS feature only
-          - os: windows-latest
-            feature: 'ndarray-blas-accelerate'
-          # macos on CI does not have Metal GPU
           - os: macos-13
-            feature: 'wgpu'
+            backend: 'wgpu'
           # windows can have CPU Vulkan but Burn doesn't select CPU well yet
           - os: windows-latest
-            feature: 'wgpu'
+            backend: 'wgpu'
           # ubuntu is throwing SIGSEGV
           - os: ubuntu-latest
-            feature: 'wgpu'
+            backend: 'wgpu'
     steps:
-    - name: checkout
+    - name: Checkout
       uses: actions/checkout@v2
-    - name: install rust
-      uses: oxideai/setup-rust-toolchain@51173b3da485cd71e24a9acbcbe2549aa16fa0b6
+    - name: Install Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         cache: false
         toolchain: ${{ matrix.rust }}
-        matcher: ${{ matrix.os == 'ubuntu-latest' && matrix.rust == 'stable' && matrix.feature == 'ndarray' }}
+        matcher: ${{ runner.os == 'Linux' && matrix.rust == 'stable' && matrix.backend == 'ndarray' }}
         rustflags: "" # Disable when we're ready
-    - name: caching
+    - name: Setup cache
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.feature }}-${{ hashFiles('**/Cargo.toml') }}
-    - name: (linux) install llvmpipe, lavapipe
+        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.backend }}-${{ hashFiles('**/Cargo.toml') }}
+    - name: (Linux) Install llvmpipe, lavapipe
       if: runner.os == 'Linux'
       run: |-
         sudo apt-get update -y -qq
         sudo add-apt-repository ppa:kisak/kisak-mesa -y
         sudo apt-get update
         sudo apt install -y libegl1-mesa libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers
-    - name: (windows) install warp
+    - name: (Windows) Install warp
       if: runner.os == 'Windows'
       shell: bash
       run: |-
@@ -81,7 +74,7 @@ jobs:
 
         cp -v warp/d3d10warp.dll target/debug/
         cp -v warp/d3d10warp.dll target/debug/deps
-    - name: (windows) install mesa
+    - name: (Windows) Install mesa
       if: runner.os == 'Windows'
       shell: bash
       run: |-
@@ -97,37 +90,48 @@ jobs:
 
         echo "VK_DRIVER_FILES=$PWD/mesa/lvp_icd.x86_64.json" >> "$GITHUB_ENV"
         echo "GALLIUM_DRIVER=llvmpipe" >> "$GITHUB_ENV"
-    - name: (windows) install dxc
+    - name: (Windows) Install dxc
       if: runner.os == 'Windows'
       uses: napokue/setup-dxc@v1.1.0
-    - name: test
-      run: cargo test --features ${{ matrix.feature }}
+    - name: Run tests
+      shell: bash
+      run: |-
+        echo "::group::${{ matrix.backend }}"
+        cargo test --features ${{ matrix.backend }}
+        echo "::endgroup::"
+
+        # test accelerate feature for ndarray on macOS
+        if [ "${{ matrix.backend }}" = "ndarray" ] && [ "${{ runner.os }}" = "macOS" ]; then
+          echo "::group::${{ matrix.backend }} with accelerate"
+          cargo test --features ${{ matrix.backend }} accelerate
+          echo "::endgroup::"
+        fi
   check-no-std:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust: [stable]
         target: ['wasm32-unknown-unknown', 'thumbv7m-none-eabi']
-        feature: ['ndarray-no-std']
+        backend: ['ndarray']
         include:
           - cache: stable
             rust: stable
     steps:
-    - name: checkout
+    - name: Checkout
       uses: actions/checkout@v2
-    - name: install rust
-      uses: oxideai/setup-rust-toolchain@51173b3da485cd71e24a9acbcbe2549aa16fa0b6
+    - name: Install Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: ${{ matrix.rust }}
         target: ${{ matrix.target }}
         cache: false
         matcher: false
         rustflags: "" # Disable when we're ready
-    - name: caching
+    - name: Setup cache
       uses: Swatinem/rust-cache@v2
       with:
-        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.feature }}-${{ hashFiles('**/Cargo.toml') }}
-    - name: test
-      run: cargo test --no-default-features --features ${{ matrix.feature }}
-    - name: build ${{ matrix.target }}
-      run: cargo build --no-default-features --features ${{ matrix.feature }} --target ${{ matrix.target }}
+        key: ${{ runner.os }}-${{ matrix.cache }}-${{ matrix.backend }}-${{ hashFiles('**/Cargo.toml') }}
+    - name: Run tests
+      run: cargo test --no-default-features --features ${{ matrix.backend }}
+    - name: Build ${{ matrix.target }}
+      run: cargo build --no-default-features --features ${{ matrix.backend }} --target ${{ matrix.target }}

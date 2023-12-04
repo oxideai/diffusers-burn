@@ -5,13 +5,13 @@ edition = "2021"
 
 [features]
 default = ["burn/default", "std"]
-
 std = ["burn/std"]
 
-ndarray = ["burn/ndarray"]
-ndarray-no-std = ["burn/ndarray-no-std"]
-ndarray-blas-accelerate = ["burn/ndarray-blas-accelerate"]
+# Backend
+accelerate = ["burn/accelerate"]
+cuda = ["burn/cuda"]
 
+ndarray = ["burn/ndarray"]
 torch = ["burn/tch"]
 wgpu = ["burn/wgpu"]
 
@@ -19,6 +19,3 @@ wgpu = ["burn/wgpu"]
 burn = { version = "0.11.0", default-features = false }
 num-traits = { version = "0.2.17", default-features = false }
 serde = { version = "1.0.192", default-features = false, features = ["derive", "alloc"] }
-
-[patch.crates-io]
-burn = { git = "https://github.com/Tracel-AI/burn", rev = "1f18cf4adff9682052c4919b8986968cabe85da4" }
