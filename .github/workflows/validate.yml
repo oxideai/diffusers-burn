@@ -90,7 +90,7 @@ jobs:
 
         echo "VK_DRIVER_FILES=$PWD/mesa/lvp_icd.x86_64.json" >> "$GITHUB_ENV"
         echo "GALLIUM_DRIVER=llvmpipe" >> "$GITHUB_ENV"
-    - name: (windows) Install dxc
+    - name: (Windows) Install dxc
       if: runner.os == 'Windows'
       uses: napokue/setup-dxc@v1.1.0
     - name: Run tests
