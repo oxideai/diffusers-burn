@@ -135,16 +135,11 @@ impl DownEncoderBlock2DConfig {
                         self.out_channels
                     };
 
-                    let conv_cfg = ResnetBlock2DConfig {
-                        in_channels,
-                        out_channels: Some(self.out_channels),
-                        groups: self.resnet_groups,
-                        groups_out: None,
-                        eps: self.resnet_eps,
-                        temb_channels: None,
-                        use_in_shortcut: None,
-                        output_scale_factor: self.output_scale_factor,
-                    };
+                    let conv_cfg = ResnetBlock2DConfig::new(in_channels)
+                        .with_out_channels(Some(self.out_channels))
+                        .with_groups(self.resnet_groups)
+                        .with_eps(self.resnet_eps)
+                        .with_output_scale_factor(self.output_scale_factor);
 
                     conv_cfg.init()
                 })
@@ -178,6 +173,77 @@ impl<B: Backend> DownEncoderBlock2D<B> {
         }
         match &self.downsampler {
             Some(downsampler) => downsampler.forward(xs),
+            None => xs,
+        }
+    }
+}
+
+#[derive(Config, Debug)]
+pub struct UpDecoderBlock2DConfig {
+    pub out_channels: usize,
+    #[config(default = 1)]
+    pub num_layers: usize,
+    #[config(default = 1e-6)]
+    pub resnet_eps: f64,
+    #[config(default = 32)]
+    pub resnet_groups: usize,
+    #[config(default = 1.)]
+    pub output_scale_factor: f64,
+    #[config(default = true)]
+    pub add_upsample: bool,
+}
+
+#[derive(Module, Debug)]
+pub struct UpDecoderBlock2D<B: Backend> {
+    resnets: Vec<ResnetBlock2D<B>>,
+    upsampler: Option<Upsample2D<B>>,
+}
+
+impl UpDecoderBlock2DConfig {
+    pub fn init<B: Backend>(&self, in_channels: usize) -> UpDecoderBlock2D<B> {
+        let resnets: Vec<_> = {
+            (0..(self.num_layers))
+                .map(|i| {
+                    let in_channels = if i == 0 {
+                        in_channels
+                    } else {
+                        self.out_channels
+                    };
+
+                    let conv_cfg = ResnetBlock2DConfig::new(in_channels)
+                        .with_out_channels(Some(self.out_channels))
+                        .with_groups(self.resnet_groups)
+                        .with_eps(self.resnet_eps)
+                        .with_output_scale_factor(self.output_scale_factor);
+
+                    conv_cfg.init()
+                })
+                .collect()
+        };
+
+        let upsampler = if self.add_upsample {
+            let upsample = Upsample2DConfig {
+                in_channels: self.out_channels,
+                out_channels: self.out_channels,
+            };
+
+            Some(upsample.init())
+        } else {
+            None
+        };
+
+        UpDecoderBlock2D { resnets, upsampler }
+    }
+}
+
+impl<B: Backend> UpDecoderBlock2D<B> {
+    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+        let mut xs = xs.clone();
+        for resnet in self.resnets.iter() {
+            xs = resnet.forward(xs, None)
+        }
+        match &self.upsampler {
+            Some(upsampler) => upsampler.forward(xs, None),
             None => xs,
         }
     }
