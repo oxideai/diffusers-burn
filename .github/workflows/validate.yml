@@ -48,7 +48,7 @@ jobs:
       with:
         cache: false
         toolchain: ${{ matrix.rust }}
-        matcher: ${{ matrix.os == 'ubuntu-latest' && matrix.rust == 'stable' && matrix.backend == 'ndarray' }}
+        matcher: ${{ runner.os == 'Linux' && matrix.rust == 'stable' && matrix.backend == 'ndarray' }}
         rustflags: "" # Disable when we're ready
     - name: caching
       uses: Swatinem/rust-cache@v2
@@ -95,11 +95,11 @@ jobs:
       uses: napokue/setup-dxc@v1.1.0
     - name: test
       run: |-
-        cargo test --features ${{ matrix.feature }}
+        cargo test --features ${{ matrix.backend }}
 
         # test accelerate feature for ndarray on macOS
         if [ "${{ matrix.backend }}" = "ndarray" ] && [ "${{ runner.os }}" = "macOS" ]; then
-          cargo test --features ${{ matrix.feature }} accelerate
+          cargo test --features ${{ matrix.backend }} accelerate
         fi
   check-no-std:
     runs-on: ubuntu-latest
