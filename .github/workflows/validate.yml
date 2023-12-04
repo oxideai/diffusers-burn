@@ -103,7 +103,7 @@ jobs:
         # test accelerate feature for ndarray on macOS
         if [ "${{ matrix.backend }}" = "ndarray" ] && [ "${{ runner.os }}" = "macOS" ]; then
           echo "::group::${{ matrix.backend }} with accelerate"
-          cargo test --features ${{ matrix.backend }} accelerate
+          cargo test --features ${{ matrix.backend }} --features accelerate
           echo "::endgroup::"
         fi
   check-no-std:
