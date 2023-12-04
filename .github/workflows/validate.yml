@@ -94,6 +94,7 @@ jobs:
       if: runner.os == 'Windows'
       uses: napokue/setup-dxc@v1.1.0
     - name: test
+      shell: bash
       run: |-
         cargo test --features ${{ matrix.backend }}
 
