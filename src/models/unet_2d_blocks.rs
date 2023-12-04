@@ -10,7 +10,10 @@ use burn::{
 
 use crate::utils::{pad_with_zeros, upsample_nearest2d};
 
-use super::resnet::{ResnetBlock2D, ResnetBlock2DConfig};
+use super::{
+    attention::{AttentionBlock, AttentionBlockConfig},
+    resnet::{ResnetBlock2D, ResnetBlock2DConfig},
+};
 
 #[derive(Config)]
 struct Downsample2DConfig {
@@ -246,6 +249,88 @@ impl<B: Backend> UpDecoderBlock2D<B> {
             Some(upsampler) => upsampler.forward(xs, None),
             None => xs,
         }
+    }
+}
+
+#[derive(Config, Debug)]
+pub struct UNetMidBlock2DConfig {
+    in_channels: usize,
+    temb_channels: Option<usize>,
+    #[config(default = 1)]
+    pub num_layers: usize,
+    #[config(default = 1e-6)]
+    pub resnet_eps: f64,
+    pub resnet_groups: Option<usize>,
+    pub attn_num_head_channels: Option<usize>,
+    // attention_type "default"
+    #[config(default = 1.)]
+    pub output_scale_factor: f64,
+}
+
+#[derive(Module, Debug)]
+struct AttentionResnetBlock2D<B: Backend> {
+    attention_block: AttentionBlock<B>,
+    resnet_block: ResnetBlock2D<B>,
+}
+
+#[derive(Module, Debug)]
+pub struct UNetMidBlock2D<B: Backend> {
+    resnet: ResnetBlock2D<B>,
+    attn_resnets: Vec<AttentionResnetBlock2D<B>>,
+}
+
+impl UNetMidBlock2DConfig {
+    pub fn init<B: Backend>(&self) -> UNetMidBlock2D<B> {
+        let resnet_groups = self
+            .resnet_groups
+            .unwrap_or_else(|| usize::min(self.in_channels / 4, 32));
+
+        let resnet = ResnetBlock2DConfig::new(self.in_channels)
+            .with_eps(self.resnet_eps)
+            .with_groups(resnet_groups)
+            .with_output_scale_factor(self.output_scale_factor)
+            .with_temb_channels(self.temb_channels)
+            .init();
+
+        let mut attn_resnets = vec![];
+        for _index in 0..self.num_layers {
+            let attention_block = AttentionBlockConfig::new(self.in_channels)
+                .with_n_head_channels(self.attn_num_head_channels)
+                .with_n_groups(resnet_groups)
+                .with_rescale_output_factor(self.output_scale_factor)
+                .with_eps(self.resnet_eps)
+                .init();
+
+            let resnet_block = ResnetBlock2DConfig::new(self.in_channels)
+                .with_eps(self.resnet_eps)
+                .with_groups(resnet_groups)
+                .with_output_scale_factor(self.output_scale_factor)
+                .with_temb_channels(self.temb_channels)
+                .init();
+
+            attn_resnets.push(AttentionResnetBlock2D {
+                attention_block,
+                resnet_block,
+            })
+        }
+
+        UNetMidBlock2D {
+            resnet,
+            attn_resnets,
+        }
+    }
+}
+
+impl<B: Backend> UNetMidBlock2D<B> {
+    pub fn forward(&self, xs: Tensor<B, 4>, temb: Option<Tensor<B, 2>>) -> Tensor<B, 4> {
+        let mut xs = self.resnet.forward(xs, temb.clone());
+        for block in self.attn_resnets.iter() {
+            xs = block
+                .resnet_block
+                .forward(block.attention_block.forward(xs), temb.clone())
+        }
+
+        xs
     }
 }
 

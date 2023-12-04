@@ -402,7 +402,7 @@ pub struct AttentionBlock<B: Backend> {
 }
 
 impl AttentionBlockConfig {
-    fn init<B: Backend>(&self, device: &B::Device) -> AttentionBlock<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> AttentionBlock<B> {
         let n_head_channels = self.n_head_channels.unwrap_or(self.channels);
         let n_heads = self.channels / n_head_channels;
         let group_norm = GroupNormConfig::new(self.n_groups, self.channels)
@@ -433,7 +433,7 @@ impl<B: Backend> AttentionBlock<B> {
             .swap_dims(1, 2)
     }
 
-    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+    pub fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
         let residual = xs.clone();
         let [n_batch, channel, height, width] = xs.dims();
         let xs = self
