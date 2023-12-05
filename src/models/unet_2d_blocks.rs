@@ -15,6 +15,9 @@ use super::{
     resnet::{ResnetBlock2D, ResnetBlock2DConfig},
 };
 
+use alloc::vec;
+use alloc::vec::Vec;
+
 #[derive(Config)]
 struct Downsample2DConfig {
     in_channels: usize,
