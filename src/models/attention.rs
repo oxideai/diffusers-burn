@@ -320,7 +320,7 @@ pub struct SpatialTransformer<B: Backend> {
 }
 
 impl SpatialTransformerConfig {
-    fn init<B: Backend>(&self, device: &B::Device) -> SpatialTransformer<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> SpatialTransformer<B> {
         let d_inner = self.n_heads * self.d_head;
         let norm = GroupNormConfig::new(self.n_groups, self.in_channels)
             .with_epsilon(1e-6)
@@ -351,7 +351,7 @@ impl SpatialTransformerConfig {
 }
 
 impl<B: Backend> SpatialTransformer<B> {
-    fn forward(&self, xs: Tensor<B, 4>, context: Option<Tensor<B, 3>>) -> Tensor<B, 4> {
+    pub fn forward(&self, xs: Tensor<B, 4>, context: Option<Tensor<B, 3>>) -> Tensor<B, 4> {
         let [n_batch, _n_channel, height, weight] = xs.dims();
 
         let residual = xs.clone();

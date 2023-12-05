@@ -11,7 +11,9 @@ use burn::{
 use crate::utils::{pad_with_zeros, upsample_nearest2d};
 
 use super::{
-    attention::{AttentionBlock, AttentionBlockConfig},
+    attention::{
+        AttentionBlock, AttentionBlockConfig, SpatialTransformer, SpatialTransformerConfig,
+    },
     resnet::{ResnetBlock2D, ResnetBlock2DConfig},
 };
 
@@ -331,6 +333,102 @@ impl<B: Backend> UNetMidBlock2D<B> {
             xs = block
                 .resnet_block
                 .forward(block.attention_block.forward(xs), temb.clone())
+        }
+
+        xs
+    }
+}
+
+#[derive(Config)]
+pub struct UNetMidBlock2DCrossAttnConfig {
+    in_channels: usize,
+    temb_channels: Option<usize>,
+    #[config(default = 1)]
+    pub num_layers: usize,
+    #[config(default = 1e-6)]
+    pub resnet_eps: f64,
+    // Note: Should default to 32
+    pub resnet_groups: Option<usize>,
+    #[config(default = 1)]
+    pub attn_num_head_channels: usize,
+    // attention_type "default"
+    #[config(default = 1.)]
+    pub output_scale_factor: f64,
+    #[config(default = 1280)]
+    pub cross_attn_dim: usize,
+    pub sliced_attention_size: Option<usize>,
+    #[config(default = false)]
+    pub use_linear_projection: bool,
+    #[config(default = 1)]
+    pub transformer_layers_per_block: usize,
+}
+
+#[derive(Module, Debug)]
+struct SpatialTransformerResnetBlock2D<B: Backend> {
+    spatial_transformer: SpatialTransformer<B>,
+    resnet_block: ResnetBlock2D<B>,
+}
+
+#[derive(Module, Debug)]
+pub struct UNetMidBlock2DCrossAttn<B: Backend> {
+    resnet: ResnetBlock2D<B>,
+    attn_resnets: Vec<SpatialTransformerResnetBlock2D<B>>,
+}
+
+impl UNetMidBlock2DCrossAttnConfig {
+    pub fn init<B: Backend>(&self) -> UNetMidBlock2DCrossAttn<B> {
+        let resnet_groups = self
+            .resnet_groups
+            .unwrap_or_else(|| usize::min(self.in_channels / 4, 32));
+        let resnet = ResnetBlock2DConfig::new(self.in_channels)
+            .with_eps(self.resnet_eps)
+            .with_groups(resnet_groups)
+            .with_output_scale_factor(self.output_scale_factor)
+            .with_temb_channels(self.temb_channels)
+            .init();
+
+        let mut attn_resnets = vec![];
+        for _index in 0..self.num_layers {
+            let spatial_transformer = SpatialTransformerConfig::new(
+                self.in_channels,
+                self.attn_num_head_channels,
+                self.in_channels / self.attn_num_head_channels,
+            )
+            .init();
+
+            let resnet_block = ResnetBlock2DConfig::new(self.in_channels)
+                .with_eps(self.resnet_eps)
+                .with_groups(resnet_groups)
+                .with_output_scale_factor(self.output_scale_factor)
+                .with_temb_channels(self.temb_channels)
+                .init();
+
+            attn_resnets.push(SpatialTransformerResnetBlock2D {
+                spatial_transformer,
+                resnet_block,
+            })
+        }
+
+        UNetMidBlock2DCrossAttn {
+            resnet,
+            attn_resnets,
+        }
+    }
+}
+
+impl<B: Backend> UNetMidBlock2DCrossAttn<B> {
+    pub fn forward(
+        &self,
+        xs: Tensor<B, 4>,
+        temb: Option<Tensor<B, 2>>,
+        encoder_hidden_states: Option<Tensor<B, 3>>,
+    ) -> Tensor<B, 4> {
+        let mut xs = self.resnet.forward(xs, temb.clone());
+        for block in self.attn_resnets.iter() {
+            let trans = block
+                .spatial_transformer
+                .forward(xs, encoder_hidden_states.clone());
+            xs = self.resnet.forward(trans, temb.clone());
         }
 
         xs
