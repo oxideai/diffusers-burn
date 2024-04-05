@@ -119,11 +119,12 @@ impl ClipConfig {
         }
     }
 
-    fn init_text_embeddings<B: Backend>(&self) -> ClipTextEmbeddings<B> {
-        let token_embedding = nn::EmbeddingConfig::new(self.vocab_size, self.embed_dim).init();
+    fn init_text_embeddings<B: Backend>(&self, device: &B::Device) -> ClipTextEmbeddings<B> {
+        let token_embedding =
+            nn::EmbeddingConfig::new(self.vocab_size, self.embed_dim).init(device);
         let position_embedding =
-            nn::EmbeddingConfig::new(self.max_position_embeddings, self.embed_dim).init();
-        let position_ids = Tensor::arange(0..self.max_position_embeddings).unsqueeze();
+            nn::EmbeddingConfig::new(self.max_position_embeddings, self.embed_dim).init(device);
+        let position_ids = Tensor::arange(0..self.max_position_embeddings, device).unsqueeze();
 
         ClipTextEmbeddings {
             token_embedding,
@@ -132,7 +133,7 @@ impl ClipConfig {
         }
     }
 
-    fn init_attention<B: Backend>(&self) -> ClipAttention<B> {
+    fn init_attention<B: Backend>(&self, device: &B::Device) -> ClipAttention<B> {
         assert_eq!(
             self.embed_dim % self.num_attention_heads,
             0,
@@ -145,14 +146,14 @@ impl ClipConfig {
         let num_attention_heads = self.num_attention_heads;
         let k_proj = nn::LinearConfig::new(embed_dim, embed_dim)
             .with_bias(false)
-            .init();
+            .init(device);
         let v_proj = nn::LinearConfig::new(embed_dim, embed_dim)
             .with_bias(false)
-            .init();
+            .init(device);
         let q_proj = nn::LinearConfig::new(embed_dim, embed_dim)
             .with_bias(false)
-            .init();
-        let out_proj = nn::LinearConfig::new(embed_dim, embed_dim).init();
+            .init(device);
+        let out_proj = nn::LinearConfig::new(embed_dim, embed_dim).init(device);
         let head_dim = embed_dim / num_attention_heads;
         let scale = (head_dim as f64).powf(-0.5);
         ClipAttention {
@@ -166,9 +167,9 @@ impl ClipConfig {
         }
     }
 
-    fn init_mlp<B: Backend>(&self) -> ClipMlp<B> {
-        let fc1 = nn::LinearConfig::new(self.embed_dim, self.intermediate_size).init();
-        let fc2 = nn::LinearConfig::new(self.intermediate_size, self.embed_dim).init();
+    fn init_mlp<B: Backend>(&self, device: &B::Device) -> ClipMlp<B> {
+        let fc1 = nn::LinearConfig::new(self.embed_dim, self.intermediate_size).init(device);
+        let fc2 = nn::LinearConfig::new(self.intermediate_size, self.embed_dim).init(device);
         ClipMlp {
             fc1,
             fc2,
@@ -176,28 +177,28 @@ impl ClipConfig {
         }
     }
 
-    fn init_encoder_layer<B: Backend>(&self) -> ClipEncoderLayer<B> {
+    fn init_encoder_layer<B: Backend>(&self, device: &B::Device) -> ClipEncoderLayer<B> {
         ClipEncoderLayer {
-            self_attn: self.init_attention(),
-            layer_norm1: nn::LayerNormConfig::new(self.embed_dim).init(),
-            mlp: self.init_mlp(),
-            layer_norm2: nn::LayerNormConfig::new(self.embed_dim).init(),
+            self_attn: self.init_attention(device),
+            layer_norm1: nn::LayerNormConfig::new(self.embed_dim).init(device),
+            mlp: self.init_mlp(device),
+            layer_norm2: nn::LayerNormConfig::new(self.embed_dim).init(device),
         }
     }
 
-    fn init_encoder<B: Backend>(&self) -> ClipEncoder<B> {
+    fn init_encoder<B: Backend>(&self, device: &B::Device) -> ClipEncoder<B> {
         let mut layers: Vec<ClipEncoderLayer<B>> = Vec::new();
         for _index in 0..self.num_hidden_layers {
-            let layer = self.init_encoder_layer();
+            let layer = self.init_encoder_layer(device);
             layers.push(layer)
         }
         ClipEncoder { layers }
     }
 
-    pub fn init_text_transformer<B: Backend>(&self) -> ClipTextTransformer<B> {
-        let embeddings = self.init_text_embeddings();
-        let encoder = self.init_encoder();
-        let final_layer_norm = nn::LayerNormConfig::new(self.embed_dim).init();
+    pub fn init_text_transformer<B: Backend>(&self, device: &B::Device) -> ClipTextTransformer<B> {
+        let embeddings = self.init_text_embeddings(device);
+        let encoder = self.init_encoder(device);
+        let final_layer_norm = nn::LayerNormConfig::new(self.embed_dim).init(device);
         ClipTextTransformer {
             embeddings,
             encoder,
@@ -337,7 +338,7 @@ impl<B: Backend> ClipTextTransformer<B> {
         seq_len: usize,
         device: &B::Device,
     ) -> Tensor<B, 4> {
-        let mask: Tensor<B, 3> = Tensor::full_device([bsz, seq_len, seq_len], f32::MIN, device);
+        let mask: Tensor<B, 3> = Tensor::full([bsz, seq_len, seq_len], f32::MIN, device);
         mask.triu(1).unsqueeze_dim(1)
     }
 
@@ -359,8 +360,10 @@ mod tests {
 
     #[test]
     fn test_init_text_embeddings() {
+        let device = Default::default();
         let clip_config = ClipConfig::v1_5();
-        let text_embeddings: ClipTextEmbeddings<TestBackend> = clip_config.init_text_embeddings();
+        let text_embeddings: ClipTextEmbeddings<TestBackend> =
+            clip_config.init_text_embeddings(&device);
 
         assert_eq!(
             text_embeddings.position_ids.to_data(),
@@ -377,10 +380,11 @@ mod tests {
 
     #[test]
     fn test_clip_attention_shape() {
+        let device = Default::default();
         let clip_config = ClipConfig::v1_5();
-        let clip_attention: ClipAttention<TestBackend> = clip_config.init_attention();
+        let clip_attention: ClipAttention<TestBackend> = clip_config.init_attention(&device);
 
-        let xs = Tensor::<TestBackend, 3>::zeros([2, 77, 768]);
+        let xs = Tensor::<TestBackend, 3>::zeros([2, 77, 768], &device);
         let xs = clip_attention.shape(xs, 77, 2);
 
         assert_eq!(xs.shape(), Shape::from([2, 12, 77, 64]));

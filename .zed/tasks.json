@@ -1,0 +1,29 @@
+[
+  {
+    "label": "build",
+    "command": "cargo",
+    "args": ["build"]
+  },
+  {
+    "label": "format",
+    "command": "cargo",
+    "args": ["fmt"]
+  },
+  {
+    "label": "test [STD]",
+    "command": "cargo",
+    "args": ["test", "--features", "wgpu", "--", "--nocapture"]
+  },
+  {
+    "label": "test [No STD]",
+    "command": "cargo",
+    "args": [
+      "test",
+      "--no-default-features",
+      "--features",
+      "ndarray",
+      "--",
+      "--nocapture"
+    ]
+  }
+]

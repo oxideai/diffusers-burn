@@ -27,9 +27,9 @@ pub struct TimestepEmbedding<B: Backend> {
 impl TimestepEmbeddingConfig {
     /// Initialize a new [embedding](TimestepEmbedding) module.
     /// Uses activating function: "silu".
-    pub fn init<B: Backend>(&self) -> TimestepEmbedding<B> {
-        let linear_1 = LinearConfig::new(self.channel, self.time_embed_dim).init();
-        let linear_2 = LinearConfig::new(self.time_embed_dim, self.time_embed_dim).init();
+    pub fn init<B: Backend>(&self, device: &B::Device) -> TimestepEmbedding<B> {
+        let linear_1 = LinearConfig::new(self.channel, self.time_embed_dim).init(device);
+        let linear_2 = LinearConfig::new(self.time_embed_dim, self.time_embed_dim).init(device);
         TimestepEmbedding { linear_1, linear_2 }
     }
 }
@@ -61,7 +61,7 @@ impl<B: Backend> Timesteps<B> {
 
     pub fn forward<const D1: usize, const D2: usize>(&self, xs: Tensor<B, D1>) -> Tensor<B, D2> {
         let half_dim = self.num_channels / 2;
-        let exponent = Tensor::arange_device(0..half_dim, &xs.device()).float() * -f64::ln(10000.);
+        let exponent = Tensor::arange(0..half_dim, &xs.device()).float() * -f64::ln(10000.);
         let exponent = exponent / (half_dim as f64 - self.downscale_freq_shift);
         let emb = exponent.exp();
         // emb = timesteps[:, None].float() * emb[None, :]
@@ -89,8 +89,9 @@ mod tests {
     #[test]
     #[cfg(not(feature = "torch"))]
     fn test_timesteps_even_channels() {
+        let device = Default::default();
         let timesteps = Timesteps::<TestBackend>::new(4, true, 0.);
-        let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4.]));
+        let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4.]), &device);
 
         let emb = timesteps.forward(xs);
 
@@ -109,8 +110,10 @@ mod tests {
     #[test]
     #[cfg(not(feature = "torch"))]
     fn test_timesteps_odd_channels() {
+        let device = Default::default();
         let timesteps = Timesteps::<TestBackend>::new(5, true, 0.);
-        let xs: Tensor<TestBackend, 1> = Tensor::from_data(Data::from([1., 2., 3., 4., 5.]));
+        let xs: Tensor<TestBackend, 1> =
+            Tensor::from_data(Data::from([1., 2., 3., 4., 5.]), &device);
 
         let emb = timesteps.forward(xs);
 

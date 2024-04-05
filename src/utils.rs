@@ -22,7 +22,7 @@ where
         );
         let mut dims = tensor.shape().dims.to_vec();
         dims[dim] = right;
-        let right = Tensor::zeros_device(dims, &tensor.device());
+        let right = Tensor::zeros(dims, &tensor.device());
         Tensor::cat(vec![tensor, right], dim)
     } else if right == 0 {
         assert!(
@@ -31,7 +31,7 @@ where
         );
         let mut dims = tensor.shape().dims.to_vec();
         dims[dim] = left;
-        let left = Tensor::zeros_device(dims, &tensor.device());
+        let left = Tensor::zeros(dims, &tensor.device());
         Tensor::cat(vec![left, tensor], dim)
     } else {
         assert!(
@@ -40,9 +40,9 @@ where
         );
         let mut dims = tensor.shape().dims.to_vec();
         dims[dim] = left;
-        let left = Tensor::zeros_device(dims.clone(), &tensor.device());
+        let left = Tensor::zeros(dims.clone(), &tensor.device());
         dims[dim] = right;
-        let right = Tensor::zeros_device(dims, &tensor.device());
+        let right = Tensor::zeros(dims, &tensor.device());
         Tensor::cat(vec![left, tensor, right], dim)
     }
 }
@@ -55,8 +55,11 @@ mod tests {
 
     #[test]
     fn test_pad_with_zeros() {
-        let tensor: Tensor<TestBackend, 3> =
-            Tensor::from_data(Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]));
+        let device = Default::default();
+        let tensor: Tensor<TestBackend, 3> = Tensor::from_data(
+            Data::from([[[1.6585, 0.4320], [-0.8701, -0.4649]]]),
+            &device,
+        );
 
         let padded = pad_with_zeros(tensor, 0, 1, 2);
 
