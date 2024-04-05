@@ -11,11 +11,15 @@ pub struct StableDiffusionConfig {
 }
 
 impl StableDiffusionConfig {
-    pub fn init<B: Backend>(&self, clip_config: ClipConfig) -> StableDiffusion<B> {
+    pub fn init<B: Backend>(
+        &self,
+        clip_config: ClipConfig,
+        device: &B::Device,
+    ) -> StableDiffusion<B> {
         StableDiffusion {
             width: self.width,
             height: self.height,
-            clip: clip_config.init_text_transformer(),
+            clip: clip_config.init_text_transformer(device),
         }
     }
 }

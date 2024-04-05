@@ -31,8 +31,8 @@ struct GeGlu<B: Backend> {
 }
 
 impl GeGluConfig {
-    fn init<B: Backend>(&self) -> GeGlu<B> {
-        let proj = LinearConfig::new(self.d_input, 2 * self.d_output).init();
+    fn init<B: Backend>(&self, device: &B::Device) -> GeGlu<B> {
+        let proj = LinearConfig::new(self.d_input, 2 * self.d_output).init(device);
         GeGlu { proj }
     }
 }
@@ -66,7 +66,7 @@ pub struct FeedForward<B: Backend> {
 }
 
 impl FeedForwardConfig {
-    pub fn init<B: Backend>(&self) -> FeedForward<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> FeedForward<B> {
         let inner_dim = self.d_input * self.multiplier;
         let dim_out = self.d_output.unwrap_or(self.d_input);
 
@@ -75,8 +75,8 @@ impl FeedForwardConfig {
                 d_input: self.d_input,
                 d_output: inner_dim,
             }
-            .init(),
-            linear_outer: LinearConfig::new(inner_dim, dim_out).init(),
+            .init(device),
+            linear_outer: LinearConfig::new(inner_dim, dim_out).init(device),
             dropout: DropoutConfig::new(self.dropout).init(),
         }
     }
@@ -121,7 +121,7 @@ pub struct CrossAttention<B: Backend> {
 }
 
 impl CrossAttentionConfig {
-    pub fn init<B: Backend>(&self) -> CrossAttention<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> CrossAttention<B> {
         let inner_dim = self.d_head * self.n_heads;
         let context_dim = self.d_context.unwrap_or(self.d_query);
         let scale = 1. / (self.d_head as f64).sqrt();
@@ -129,14 +129,14 @@ impl CrossAttentionConfig {
         CrossAttention {
             query: LinearConfig::new(self.d_query, inner_dim)
                 .with_bias(false)
-                .init(),
+                .init(device),
             key: LinearConfig::new(context_dim, inner_dim)
                 .with_bias(false)
-                .init(),
+                .init(device),
             value: LinearConfig::new(context_dim, inner_dim)
                 .with_bias(false)
-                .init(),
-            output: LinearConfig::new(inner_dim, self.d_query).init(),
+                .init(device),
+            output: LinearConfig::new(inner_dim, self.d_query).init(device),
             n_heads: self.n_heads,
             scale,
             slice_size: self.slice_size,
@@ -253,22 +253,22 @@ pub struct BasicTransformerBlock<B: Backend> {
 }
 
 impl BasicTransformerBlockConfig {
-    fn init<B: Backend>(&self) -> BasicTransformerBlock<B> {
+    fn init<B: Backend>(&self, device: &B::Device) -> BasicTransformerBlock<B> {
         let attn1 = CrossAttentionConfig::new(self.d_model)
             .with_n_heads(self.n_heads)
             .with_d_head(self.d_head)
             .with_slice_size(self.sliced_attn_size)
-            .init();
-        let ff = FeedForwardConfig::new(self.d_model).init();
+            .init(device);
+        let ff = FeedForwardConfig::new(self.d_model).init(device);
         let attn2 = CrossAttentionConfig::new(self.d_model)
             .with_d_context(self.d_context)
             .with_n_heads(self.n_heads)
             .with_d_head(self.d_head)
             .with_slice_size(self.sliced_attn_size)
-            .init();
-        let norm1 = LayerNormConfig::new(self.d_model).init();
-        let norm2 = LayerNormConfig::new(self.d_model).init();
-        let norm3 = LayerNormConfig::new(self.d_model).init();
+            .init(device);
+        let norm1 = LayerNormConfig::new(self.d_model).init(device);
+        let norm2 = LayerNormConfig::new(self.d_model).init(device);
+        let norm3 = LayerNormConfig::new(self.d_model).init(device);
 
         BasicTransformerBlock {
             attn1,
@@ -320,25 +320,26 @@ pub struct SpatialTransformer<B: Backend> {
 }
 
 impl SpatialTransformerConfig {
-    fn init<B: Backend>(&self) -> SpatialTransformer<B> {
+    fn init<B: Backend>(&self, device: &B::Device) -> SpatialTransformer<B> {
         let d_inner = self.n_heads * self.d_head;
         let norm = GroupNormConfig::new(self.n_groups, self.in_channels)
             .with_epsilon(1e-6)
-            .init();
+            .init(device);
         // let proj_in = if config.use_linear_projection {
-        let proj_in = nn::conv::Conv2dConfig::new([self.in_channels, d_inner], [1, 1]).init();
+        let proj_in = nn::conv::Conv2dConfig::new([self.in_channels, d_inner], [1, 1]).init(device);
 
         let mut transformer_blocks = vec![];
         for _index in 0..self.depth {
             let tb = BasicTransformerBlockConfig::new(d_inner, self.n_heads, self.d_head)
                 .with_d_context(self.d_context)
                 .with_sliced_attn_size(self.sliced_attn_size)
-                .init();
+                .init(device);
 
             transformer_blocks.push(tb)
         }
 
-        let proj_out = nn::conv::Conv2dConfig::new([d_inner, self.in_channels], [1, 1]).init();
+        let proj_out =
+            nn::conv::Conv2dConfig::new([d_inner, self.in_channels], [1, 1]).init(device);
 
         SpatialTransformer {
             norm,
@@ -401,16 +402,16 @@ pub struct AttentionBlock<B: Backend> {
 }
 
 impl AttentionBlockConfig {
-    fn init<B: Backend>(&self) -> AttentionBlock<B> {
+    fn init<B: Backend>(&self, device: &B::Device) -> AttentionBlock<B> {
         let n_head_channels = self.n_head_channels.unwrap_or(self.channels);
         let n_heads = self.channels / n_head_channels;
         let group_norm = GroupNormConfig::new(self.n_groups, self.channels)
             .with_epsilon(self.eps)
-            .init();
-        let query = LinearConfig::new(self.channels, self.channels).init();
-        let key = LinearConfig::new(self.channels, self.channels).init();
-        let value = LinearConfig::new(self.channels, self.channels).init();
-        let proj_attn = LinearConfig::new(self.channels, self.channels).init();
+            .init(device);
+        let query = LinearConfig::new(self.channels, self.channels).init(device);
+        let key = LinearConfig::new(self.channels, self.channels).init(device);
+        let value = LinearConfig::new(self.channels, self.channels).init(device);
+        let proj_attn = LinearConfig::new(self.channels, self.channels).init(device);
 
         AttentionBlock {
             group_norm,
@@ -477,24 +478,31 @@ mod tests {
 
     #[test]
     fn test_geglu_tensor_shape_3() {
-        let weight = Tensor::from_data(Data::from([
-            [
-                0.1221, 2.0378, -0.1171, 1.3004, -0.9630, -0.3108, -1.3376, -1.0593,
-            ],
-            [
-                0.4669, -0.8146, 0.9965, -0.4659, 2.0444, -0.0709, -0.0147, 0.2135,
-            ],
-        ]));
-        let bias = Tensor::from_data(Data::from([
-            0.2867778149426027,
-            0.6646517317105776,
-            0.023946332404821136,
-            -0.1395737454364393,
-            0.05131041098737321,
-            -0.4225726694675192,
-            0.036411720220954735,
-            0.01829268669677364,
-        ]));
+        let device = Default::default();
+        let weight = Tensor::from_data(
+            Data::from([
+                [
+                    0.1221, 2.0378, -0.1171, 1.3004, -0.9630, -0.3108, -1.3376, -1.0593,
+                ],
+                [
+                    0.4669, -0.8146, 0.9965, -0.4659, 2.0444, -0.0709, -0.0147, 0.2135,
+                ],
+            ]),
+            &device,
+        );
+        let bias = Tensor::from_data(
+            Data::from([
+                0.2867778149426027,
+                0.6646517317105776,
+                0.023946332404821136,
+                -0.1395737454364393,
+                0.05131041098737321,
+                -0.4225726694675192,
+                0.036411720220954735,
+                0.01829268669677364,
+            ]),
+            &device,
+        );
 
         let geglu = GeGlu {
             proj: nn::Linear {
@@ -503,10 +511,13 @@ mod tests {
             },
         };
 
-        let tensor: Tensor<TestBackend, 3> = Tensor::from_data(Data::from([
-            [[1., 2.], [3., 4.], [5., 6.]],
-            [[7., 8.], [9., 10.], [11., 12.]],
-        ]));
+        let tensor: Tensor<TestBackend, 3> = Tensor::from_data(
+            Data::from([
+                [[1., 2.], [3., 4.], [5., 6.]],
+                [[7., 8.], [9., 10.], [11., 12.]],
+            ]),
+            &device,
+        );
 
         let output = geglu.forward(tensor);
         assert_eq!(output.shape(), Shape::from([2, 3, 4]));
@@ -529,18 +540,25 @@ mod tests {
 
     #[test]
     fn test_geglu_tensor_shape_2() {
-        let weight = Tensor::from_data(Data::from([
-            [0.6054, 1.9322, 0.1445, 1.3004, -0.6853, -0.8947],
-            [-0.3678, 0.4081, -1.9001, -1.5843, -0.9399, 0.1018],
-        ]));
-        let bias = Tensor::from_data(Data::from([
-            0.3237631905393836,
-            0.22052049807936902,
-            -0.3196353346822061,
-            -0.02244043444199162,
-            -0.33600250665852865,
-            0.5259391939301621,
-        ]));
+        let device = Default::default();
+        let weight = Tensor::from_data(
+            Data::from([
+                [0.6054, 1.9322, 0.1445, 1.3004, -0.6853, -0.8947],
+                [-0.3678, 0.4081, -1.9001, -1.5843, -0.9399, 0.1018],
+            ]),
+            &device,
+        );
+        let bias = Tensor::from_data(
+            Data::from([
+                0.3237631905393836,
+                0.22052049807936902,
+                -0.3196353346822061,
+                -0.02244043444199162,
+                -0.33600250665852865,
+                0.5259391939301621,
+            ]),
+            &device,
+        );
 
         let geglu = GeGlu {
             proj: nn::Linear {
@@ -550,7 +568,7 @@ mod tests {
         };
 
         let tensor: Tensor<TestBackend, 2> =
-            Tensor::from_data(Data::from([[1., 2.], [3., 4.], [5., 6.]]));
+            Tensor::from_data(Data::from([[1., 2.], [3., 4.], [5., 6.]]), &device);
 
         let output = geglu.forward(tensor);
         assert_eq!(output.shape(), Shape::from([3, 3]));
@@ -566,31 +584,41 @@ mod tests {
 
     #[test]
     fn test_sliced_attention() {
+        let device = Default::default();
         // create tensor of size [2, 4, 2]
-        let query: Tensor<TestBackend, 3> = Tensor::from_data(Data::from([
-            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
-            [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
-            [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
-            [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
-        ]));
-        let key: Tensor<TestBackend, 3> = Tensor::from_data(Data::from([
-            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
-            [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
-            [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
-            [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
-        ]));
-        let value: Tensor<TestBackend, 3> = Tensor::from_data(Data::from([
-            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
-            [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
-            [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
-            [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
-        ]));
+        let query: Tensor<TestBackend, 3> = Tensor::from_data(
+            Data::from([
+                [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+                [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
+                [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
+                [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
+            ]),
+            &device,
+        );
+        let key: Tensor<TestBackend, 3> = Tensor::from_data(
+            Data::from([
+                [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+                [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
+                [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
+                [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
+            ]),
+            &device,
+        );
+        let value: Tensor<TestBackend, 3> = Tensor::from_data(
+            Data::from([
+                [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]],
+                [[9.0, 10.0], [11.0, 12.0], [13.0, 14.0], [15.0, 16.0]],
+                [[17.0, 18.0], [19.0, 20.0], [21.0, 22.0], [23.0, 24.0]],
+                [[25.0, 26.0], [27.0, 28.0], [29.0, 30.0], [31.0, 32.0]],
+            ]),
+            &device,
+        );
 
         let cross_attention = CrossAttentionConfig::new(320)
             .with_n_heads(2)
             .with_d_head(40)
             .with_slice_size(Some(2))
-            .init();
+            .init(&device);
 
         let output = cross_attention.sliced_attention(query, key, value, 2);
 
