@@ -35,9 +35,6 @@ jobs:
           # windows can have CPU Vulkan but Burn doesn't select CPU well yet
           - os: windows-latest
             backend: "wgpu"
-          # ubuntu is throwing SIGSEGV
-          - os: ubuntu-latest
-            backend: "wgpu"
     steps:
       - name: Checkout
         uses: actions/checkout@v2
