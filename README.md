@@ -4,6 +4,20 @@
 
 The `diffusers-burn` crate is a conversion of [diffusers-rs](https://github.com/LaurentMazare/diffusers-rs) using [burn](https://github.com/burn-rs/burn) rather than libtorch. This implementation supports Stable Diffusion v1.5, v2.1, as well as Stable Diffusion XL 1.0.
 
+<div align="left" valign="middle">
+<a href="https://runblaze.dev">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://www.runblaze.dev/logo_dark.png">
+   <img align="right" src="https://www.runblaze.dev/logo_light.png" height="102px"/>
+ </picture>
+</a>
+
+<br style="display: none;"/>
+
+_[Blaze](https://runblaze.dev) supports this project by providing ultra-fast Apple Silicon macOS Github Action Runners. Apply the discount code `BURN50` at checkout to enjoy 50% off your first year._
+
+</div>
+
 ## Feature Flags
 
 This crate can be used without the standard library (`#![no_std]`) with `alloc` by disabling
