@@ -126,7 +126,7 @@ pub struct DownEncoderBlock2DConfig {
     pub in_channels: usize,
     pub out_channels: usize,
     #[config(default = 1)]
-    pub num_layers: usize,
+    pub n_layers: usize,
     #[config(default = 1e-6)]
     pub resnet_eps: f64,
     #[config(default = 32)]
@@ -148,7 +148,7 @@ pub struct DownEncoderBlock2D<B: Backend> {
 impl DownEncoderBlock2DConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> DownEncoderBlock2D<B> {
         let resnets: Vec<_> = {
-            (0..(self.num_layers))
+            (0..(self.n_layers))
                 .map(|i| {
                     let in_channels = if i == 0 {
                         self.in_channels
@@ -204,7 +204,7 @@ pub struct UpDecoderBlock2DConfig {
     pub in_channels: usize,
     pub out_channels: usize,
     #[config(default = 1)]
-    pub num_layers: usize,
+    pub n_layers: usize,
     #[config(default = 1e-6)]
     pub resnet_eps: f64,
     #[config(default = 32)]
@@ -224,7 +224,7 @@ pub struct UpDecoderBlock2D<B: Backend> {
 impl UpDecoderBlock2DConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> UpDecoderBlock2D<B> {
         let resnets: Vec<_> = {
-            (0..(self.num_layers))
+            (0..(self.n_layers))
                 .map(|i| {
                     let in_channels = if i == 0 {
                         self.in_channels
@@ -276,7 +276,7 @@ pub struct UNetMidBlock2DConfig {
     in_channels: usize,
     temb_channels: Option<usize>,
     #[config(default = 1)]
-    pub num_layers: usize,
+    pub n_layers: usize,
     #[config(default = 1e-6)]
     pub resnet_eps: f64,
     pub resnet_groups: Option<usize>,
@@ -312,7 +312,7 @@ impl UNetMidBlock2DConfig {
             .init(device);
 
         let mut attn_resnets = vec![];
-        for _index in 0..self.num_layers {
+        for _index in 0..self.n_layers {
             let attention_block = AttentionBlockConfig::new(self.in_channels)
                 .with_n_head_channels(self.attn_num_head_channels)
                 .with_n_groups(resnet_groups)
@@ -358,7 +358,7 @@ pub struct UNetMidBlock2DCrossAttnConfig {
     in_channels: usize,
     temb_channels: Option<usize>,
     #[config(default = 1)]
-    pub num_layers: usize,
+    pub n_layers: usize,
     #[config(default = 1e-6)]
     pub resnet_eps: f64,
     // Note: Should default to 32
@@ -402,7 +402,7 @@ impl UNetMidBlock2DCrossAttnConfig {
             .init(device);
 
         let mut attn_resnets = vec![];
-        for _index in 0..self.num_layers {
+        for _index in 0..self.n_layers {
             let spatial_transformer = SpatialTransformerConfig::new(
                 self.in_channels,
                 self.attn_num_head_channels,
@@ -460,7 +460,7 @@ pub struct DownBlock2DConfig {
     out_channels: usize,
     temb_channels: Option<usize>,
     #[config(default = 1)]
-    pub num_layers: usize,
+    pub n_layers: usize,
     #[config(default = 1e-6)]
     pub resnet_eps: f64,
     // resnet_time_scale_shift: "default"
@@ -483,7 +483,7 @@ pub struct DownBlock2D<B: Backend> {
 
 impl DownBlock2DConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> DownBlock2D<B> {
-        let resnets = (0..self.num_layers)
+        let resnets = (0..self.n_layers)
             .map(|_| {
                 ResnetBlock2DConfig::new(self.out_channels)
                     .with_eps(self.resnet_eps)
@@ -567,7 +567,7 @@ impl CrossAttnDownBlock2DConfig {
         downblock.temb_channels = self.temb_channels;
         let downblock = self.downblock.init(device);
 
-        let attentions = (0..self.downblock.num_layers)
+        let attentions = (0..self.downblock.n_layers)
             .map(|_| {
                 SpatialTransformerConfig::new(
                     self.out_channels,
@@ -621,7 +621,7 @@ pub struct UpBlock2DConfig {
     out_channels: usize,
     temb_channels: Option<usize>,
     #[config(default = 1)]
-    pub num_layers: usize,
+    pub n_layers: usize,
     #[config(default = 1e-6)]
     pub resnet_eps: f64,
     // resnet_time_scale_shift: "default"
@@ -642,9 +642,9 @@ pub struct UpBlock2D<B: Backend> {
 
 impl UpBlock2DConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> UpBlock2D<B> {
-        let resnets = (0..self.num_layers)
+        let resnets = (0..self.n_layers)
             .map(|i| {
-                let res_skip_channels = if i == self.num_layers - 1 {
+                let res_skip_channels = if i == self.n_layers - 1 {
                     self.in_channels
                 } else {
                     self.out_channels
@@ -735,7 +735,7 @@ impl CrossAttnUpBlock2DConfig {
         upblock_config.temb_channels = self.temb_channels;
         let upblock = upblock_config.init(device);
 
-        let attentions = (0..self.upblock.num_layers)
+        let attentions = (0..self.upblock.n_layers)
             .map(|_| {
                 SpatialTransformerConfig::new(
                     self.out_channels,
