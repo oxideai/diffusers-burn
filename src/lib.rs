@@ -9,7 +9,7 @@ pub mod pipelines;
 pub mod transformers;
 pub mod utils;
 
-#[cfg(all(test, not(feature = "wgpu"), not(feature = "torch")))]
+#[cfg(all(test, feature = "ndarray"))]
 use burn::backend::ndarray;
 
 #[cfg(all(test, feature = "torch"))]
@@ -20,7 +20,7 @@ use burn::backend::wgpu;
 
 extern crate alloc;
 
-#[cfg(all(test, not(feature = "wgpu"), not(feature = "torch")))]
+#[cfg(all(test, feature = "ndarray"))]
 pub type TestBackend = ndarray::NdArray<f32>;
 
 #[cfg(all(test, feature = "torch"))]

@@ -54,6 +54,7 @@ impl<B: Backend> Timesteps<B> {
         Self {
             num_channels,
             flip_sin_to_cos,
+
             downscale_freq_shift,
             _backend: PhantomData,
         }
@@ -61,7 +62,7 @@ impl<B: Backend> Timesteps<B> {
 
     pub fn forward<const D1: usize, const D2: usize>(&self, xs: Tensor<B, D1>) -> Tensor<B, D2> {
         let half_dim = self.num_channels / 2;
-        let exponent = Tensor::arange(0..half_dim, &xs.device()).float() * -f64::ln(10000.);
+        let exponent = Tensor::arange(0..half_dim as i64, &xs.device()).float() * -f64::ln(10000.);
         let exponent = exponent / (half_dim as f64 - self.downscale_freq_shift);
         let emb = exponent.exp();
         // emb = timesteps[:, None].float() * emb[None, :]

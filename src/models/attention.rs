@@ -506,8 +506,8 @@ mod tests {
 
         let geglu = GeGlu {
             proj: nn::Linear {
-                weight: Param::new(ParamId::new(), weight),
-                bias: Some(Param::new(ParamId::new(), bias)),
+                weight: Param::initialized(ParamId::new(), weight),
+                bias: Some(Param::initialized(ParamId::new(), bias)),
             },
         };
 
@@ -562,8 +562,8 @@ mod tests {
 
         let geglu = GeGlu {
             proj: nn::Linear {
-                weight: Param::new(ParamId::new(), weight),
-                bias: Some(Param::new(ParamId::new(), bias)),
+                weight: Param::initialized(ParamId::new(), weight),
+                bias: Some(Param::initialized(ParamId::new(), bias)),
             },
         };
 

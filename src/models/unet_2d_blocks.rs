@@ -5,10 +5,15 @@ use burn::{
     config::Config,
     module::Module,
     nn,
-    tensor::{backend::Backend, module::avg_pool2d, Tensor},
+    tensor::{
+        backend::Backend,
+        module::{avg_pool2d, interpolate},
+        ops::{InterpolateMode, InterpolateOptions},
+        Tensor,
+    },
 };
 
-use crate::utils::{pad_with_zeros, upsample_nearest2d};
+use crate::utils::pad_with_zeros;
 
 use super::{
     attention::{
@@ -35,12 +40,12 @@ struct Downsample2D<B: Backend> {
 }
 
 impl Downsample2DConfig {
-    fn init<B: Backend>(&self) -> Downsample2D<B> {
+    fn init<B: Backend>(&self, device: &B::Device) -> Downsample2D<B> {
         let conv = if self.use_conv {
             let conv = nn::conv::Conv2dConfig::new([self.in_channels, self.out_channels], [3, 3])
                 .with_stride([2, 2])
                 .with_padding(nn::PaddingConfig2d::Explicit(self.padding, self.padding))
-                .init();
+                .init(device);
 
             Some(conv)
         } else {
@@ -85,10 +90,10 @@ struct Upsample2D<B: Backend> {
 }
 
 impl Upsample2DConfig {
-    fn init<B: Backend>(&self) -> Upsample2D<B> {
+    fn init<B: Backend>(&self, device: &B::Device) -> Upsample2D<B> {
         let conv = nn::conv::Conv2dConfig::new([self.in_channels, self.out_channels], [3, 3])
             .with_padding(nn::PaddingConfig2d::Explicit(1, 1))
-            .init();
+            .init(device);
 
         Upsample2D { conv }
     }
@@ -99,9 +104,17 @@ impl<B: Backend> Upsample2D<B> {
         let xs = match size {
             None => {
                 let [_bsize, _channels, height, width] = xs.dims();
-                upsample_nearest2d(xs, 2 * height, 2 * width)
+                interpolate(
+                    xs,
+                    [2 * height, 2 * width],
+                    InterpolateOptions::new(InterpolateMode::Nearest),
+                )
             }
-            Some((h, w)) => upsample_nearest2d(xs, h, w),
+            Some((h, w)) => interpolate(
+                xs,
+                [h, w],
+                InterpolateOptions::new(InterpolateMode::Nearest),
+            ),
         };
 
         self.conv.forward(xs)
@@ -133,7 +146,7 @@ pub struct DownEncoderBlock2D<B: Backend> {
 }
 
 impl DownEncoderBlock2DConfig {
-    pub fn init<B: Backend>(&self) -> DownEncoderBlock2D<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> DownEncoderBlock2D<B> {
         let resnets: Vec<_> = {
             (0..(self.num_layers))
                 .map(|i| {
@@ -149,7 +162,7 @@ impl DownEncoderBlock2DConfig {
                         .with_eps(self.resnet_eps)
                         .with_output_scale_factor(self.output_scale_factor);
 
-                    conv_cfg.init()
+                    conv_cfg.init(device)
                 })
                 .collect()
         };
@@ -161,7 +174,7 @@ impl DownEncoderBlock2DConfig {
                 out_channels: self.out_channels,
                 padding: self.downsample_padding,
             };
-            Some(downsample_cfg.init())
+            Some(downsample_cfg.init(device))
         } else {
             None
         };
@@ -188,6 +201,7 @@ impl<B: Backend> DownEncoderBlock2D<B> {
 
 #[derive(Config, Debug)]
 pub struct UpDecoderBlock2DConfig {
+    pub in_channels: usize,
     pub out_channels: usize,
     #[config(default = 1)]
     pub num_layers: usize,
@@ -208,12 +222,12 @@ pub struct UpDecoderBlock2D<B: Backend> {
 }
 
 impl UpDecoderBlock2DConfig {
-    pub fn init<B: Backend>(&self, in_channels: usize) -> UpDecoderBlock2D<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> UpDecoderBlock2D<B> {
         let resnets: Vec<_> = {
             (0..(self.num_layers))
                 .map(|i| {
                     let in_channels = if i == 0 {
-                        in_channels
+                        self.in_channels
                     } else {
                         self.out_channels
                     };
@@ -224,7 +238,7 @@ impl UpDecoderBlock2DConfig {
                         .with_eps(self.resnet_eps)
                         .with_output_scale_factor(self.output_scale_factor);
 
-                    conv_cfg.init()
+                    conv_cfg.init(device)
                 })
                 .collect()
         };
@@ -235,7 +249,7 @@ impl UpDecoderBlock2DConfig {
                 out_channels: self.out_channels,
             };
 
-            Some(upsample.init())
+            Some(upsample.init(device))
         } else {
             None
         };
@@ -285,7 +299,7 @@ pub struct UNetMidBlock2D<B: Backend> {
 }
 
 impl UNetMidBlock2DConfig {
-    pub fn init<B: Backend>(&self) -> UNetMidBlock2D<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> UNetMidBlock2D<B> {
         let resnet_groups = self
             .resnet_groups
             .unwrap_or_else(|| usize::min(self.in_channels / 4, 32));
@@ -295,7 +309,7 @@ impl UNetMidBlock2DConfig {
             .with_groups(resnet_groups)
             .with_output_scale_factor(self.output_scale_factor)
             .with_temb_channels(self.temb_channels)
-            .init();
+            .init(device);
 
         let mut attn_resnets = vec![];
         for _index in 0..self.num_layers {
@@ -304,14 +318,14 @@ impl UNetMidBlock2DConfig {
                 .with_n_groups(resnet_groups)
                 .with_rescale_output_factor(self.output_scale_factor)
                 .with_eps(self.resnet_eps)
-                .init();
+                .init(device);
 
             let resnet_block = ResnetBlock2DConfig::new(self.in_channels)
                 .with_eps(self.resnet_eps)
                 .with_groups(resnet_groups)
                 .with_output_scale_factor(self.output_scale_factor)
                 .with_temb_channels(self.temb_channels)
-                .init();
+                .init(device);
 
             attn_resnets.push(AttentionResnetBlock2D {
                 attention_block,
@@ -376,7 +390,7 @@ pub struct UNetMidBlock2DCrossAttn<B: Backend> {
 }
 
 impl UNetMidBlock2DCrossAttnConfig {
-    pub fn init<B: Backend>(&self) -> UNetMidBlock2DCrossAttn<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> UNetMidBlock2DCrossAttn<B> {
         let resnet_groups = self
             .resnet_groups
             .unwrap_or_else(|| usize::min(self.in_channels / 4, 32));
@@ -385,7 +399,7 @@ impl UNetMidBlock2DCrossAttnConfig {
             .with_groups(resnet_groups)
             .with_output_scale_factor(self.output_scale_factor)
             .with_temb_channels(self.temb_channels)
-            .init();
+            .init(device);
 
         let mut attn_resnets = vec![];
         for _index in 0..self.num_layers {
@@ -394,14 +408,14 @@ impl UNetMidBlock2DCrossAttnConfig {
                 self.attn_num_head_channels,
                 self.in_channels / self.attn_num_head_channels,
             )
-            .init();
+            .init(device);
 
             let resnet_block = ResnetBlock2DConfig::new(self.in_channels)
                 .with_eps(self.resnet_eps)
                 .with_groups(resnet_groups)
                 .with_output_scale_factor(self.output_scale_factor)
                 .with_temb_channels(self.temb_channels)
-                .init();
+                .init(device);
 
             attn_resnets.push(SpatialTransformerResnetBlock2D {
                 spatial_transformer,
@@ -439,26 +453,30 @@ impl<B: Backend> UNetMidBlock2DCrossAttn<B> {
 mod tests {
     use super::*;
     use crate::TestBackend;
-    use burn::tensor::Data;
+    use burn::tensor::{Data, Distribution, Shape};
 
     #[test]
     fn test_downsample_2d_no_conv() {
-        let tensor: Tensor<TestBackend, 4> = Tensor::from_data(Data::from([
-            [
-                [[0.0351, 0.4179], [0.0137, 0.6947]],
-                [[0.9526, 0.5386], [0.2856, 0.1839]],
-                [[0.3215, 0.4595], [0.6777, 0.3946]],
-                [[0.5221, 0.4230], [0.2774, 0.1069]],
-            ],
-            [
-                [[0.8941, 0.8696], [0.5735, 0.8750]],
-                [[0.6718, 0.4144], [0.1038, 0.2629]],
-                [[0.7467, 0.9415], [0.5005, 0.6309]],
-                [[0.6534, 0.2019], [0.3670, 0.8074]],
-            ],
-        ]));
+        let device = Default::default();
+        let tensor: Tensor<TestBackend, 4> = Tensor::from_data(
+            Data::from([
+                [
+                    [[0.0351, 0.4179], [0.0137, 0.6947]],
+                    [[0.9526, 0.5386], [0.2856, 0.1839]],
+                    [[0.3215, 0.4595], [0.6777, 0.3946]],
+                    [[0.5221, 0.4230], [0.2774, 0.1069]],
+                ],
+                [
+                    [[0.8941, 0.8696], [0.5735, 0.8750]],
+                    [[0.6718, 0.4144], [0.1038, 0.2629]],
+                    [[0.7467, 0.9415], [0.5005, 0.6309]],
+                    [[0.6534, 0.2019], [0.3670, 0.8074]],
+                ],
+            ]),
+            &device,
+        );
 
-        let downsample_2d = Downsample2DConfig::new(4, false, 4, 0).init();
+        let downsample_2d = Downsample2DConfig::new(4, false, 4, 0).init(&device);
         let output = downsample_2d.forward(tensor);
 
         output.into_data().assert_approx_eq(
@@ -472,20 +490,24 @@ mod tests {
 
     #[test]
     fn test_pad_tensor_0() {
-        let tensor: Tensor<TestBackend, 4> = Tensor::from_data(Data::from([
-            [
-                [[0.8600, 0.9473], [0.2543, 0.6181]],
-                [[0.3889, 0.7722], [0.6736, 0.0454]],
-                [[0.2809, 0.4672], [0.1632, 0.3959]],
-                [[0.5317, 0.0831], [0.8353, 0.3654]],
-            ],
-            [
-                [[0.6106, 0.4130], [0.7932, 0.8800]],
-                [[0.8750, 0.1991], [0.7018, 0.7865]],
-                [[0.7470, 0.2071], [0.2699, 0.4425]],
-                [[0.7763, 0.0227], [0.6210, 0.0730]],
-            ],
-        ]));
+        let device = Default::default();
+        let tensor: Tensor<TestBackend, 4> = Tensor::from_data(
+            Data::from([
+                [
+                    [[0.8600, 0.9473], [0.2543, 0.6181]],
+                    [[0.3889, 0.7722], [0.6736, 0.0454]],
+                    [[0.2809, 0.4672], [0.1632, 0.3959]],
+                    [[0.5317, 0.0831], [0.8353, 0.3654]],
+                ],
+                [
+                    [[0.6106, 0.4130], [0.7932, 0.8800]],
+                    [[0.8750, 0.1991], [0.7018, 0.7865]],
+                    [[0.7470, 0.2071], [0.2699, 0.4425]],
+                    [[0.7763, 0.0227], [0.6210, 0.0730]],
+                ],
+            ]),
+            &device,
+        );
 
         let output = Downsample2D::pad_tensor(tensor, 0);
 
@@ -538,5 +560,33 @@ mod tests {
             ]),
             3,
         );
+    }
+
+    #[test]
+    fn test_down_encoder_block2d() {
+        TestBackend::seed(0);
+
+        let device = Default::default();
+        let block = DownEncoderBlock2DConfig::new(32, 32).init::<TestBackend>(&device);
+
+        let tensor: Tensor<TestBackend, 4> =
+            Tensor::random([4, 32, 32, 32], Distribution::Default, &device);
+        let output = block.forward(tensor.clone());
+
+        assert_eq!(output.shape(), Shape::new([4, 32, 16, 16]));
+    }
+
+    #[test]
+    fn test_up_decoder_block2d() {
+        TestBackend::seed(0);
+
+        let device = Default::default();
+        let block = UpDecoderBlock2DConfig::new(32, 32).init::<TestBackend>(&device);
+
+        let tensor: Tensor<TestBackend, 4> =
+            Tensor::random([4, 32, 32, 32], Distribution::Default, &device);
+        let output = block.forward(tensor.clone());
+
+        assert_eq!(output.shape(), Shape::new([4, 32, 64, 64]));
     }
 }
