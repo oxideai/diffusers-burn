@@ -124,7 +124,8 @@ impl ClipConfig {
             nn::EmbeddingConfig::new(self.vocab_size, self.embed_dim).init(device);
         let position_embedding =
             nn::EmbeddingConfig::new(self.max_position_embeddings, self.embed_dim).init(device);
-        let position_ids = Tensor::arange(0..self.max_position_embeddings, device).unsqueeze();
+        let position_ids =
+            Tensor::arange(0..self.max_position_embeddings as i64, device).unsqueeze();
 
         ClipTextEmbeddings {
             token_embedding,

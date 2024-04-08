@@ -297,36 +297,50 @@ pub struct SpatialTransformerConfig {
     pub n_groups: usize,
     pub d_context: Option<usize>,
     pub sliced_attn_size: Option<usize>,
-    //    #[config(default = false)]
-    //    pub use_linear_projection: bool,
+    #[config(default = false)]
+    pub use_linear_projection: bool,
     pub in_channels: usize,
     pub n_heads: usize,
     pub d_head: usize,
 }
 
-//#[derive(Config, Debug)]
-//enum Proj<B: Backend> {
-//    Conv2d(nn::conv::Conv2d<B>),
-//    Linear(nn::Linear<B>)
-//}
+#[derive(Module, Debug)]
+enum Proj<B: Backend> {
+    Conv2d(nn::conv::Conv2d<B>),
+    Linear(nn::Linear<B>),
+}
+
+impl<B: Backend> Proj<B> {
+    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+        match self {
+            Proj::Conv2d(conv) => conv.forward(xs),
+            Proj::Linear(linear) => linear.forward(xs),
+        }
+    }
+}
 
 /// Aka Transformer2DModel
 #[derive(Module, Debug)]
 pub struct SpatialTransformer<B: Backend> {
     norm: GroupNorm<B>,
-    proj_in: nn::conv::Conv2d<B>,
+    proj_in: Proj<B>,
     transformer_blocks: Vec<BasicTransformerBlock<B>>,
     proj_out: nn::conv::Conv2d<B>,
 }
 
 impl SpatialTransformerConfig {
-    fn init<B: Backend>(&self, device: &B::Device) -> SpatialTransformer<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> SpatialTransformer<B> {
         let d_inner = self.n_heads * self.d_head;
         let norm = GroupNormConfig::new(self.n_groups, self.in_channels)
             .with_epsilon(1e-6)
             .init(device);
-        // let proj_in = if config.use_linear_projection {
-        let proj_in = nn::conv::Conv2dConfig::new([self.in_channels, d_inner], [1, 1]).init(device);
+        let proj_in = if self.use_linear_projection {
+            Proj::Linear(nn::LinearConfig::new(self.in_channels, d_inner).init(device))
+        } else {
+            Proj::Conv2d(
+                nn::conv::Conv2dConfig::new([self.in_channels, d_inner], [1, 1]).init(device),
+            )
+        };
 
         let mut transformer_blocks = vec![];
         for _index in 0..self.depth {
@@ -351,7 +365,7 @@ impl SpatialTransformerConfig {
 }
 
 impl<B: Backend> SpatialTransformer<B> {
-    fn forward(&self, xs: Tensor<B, 4>, context: Option<Tensor<B, 3>>) -> Tensor<B, 4> {
+    pub fn forward(&self, xs: Tensor<B, 4>, context: Option<Tensor<B, 3>>) -> Tensor<B, 4> {
         let [n_batch, _n_channel, height, weight] = xs.dims();
 
         let residual = xs.clone();
@@ -402,7 +416,7 @@ pub struct AttentionBlock<B: Backend> {
 }
 
 impl AttentionBlockConfig {
-    fn init<B: Backend>(&self, device: &B::Device) -> AttentionBlock<B> {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> AttentionBlock<B> {
         let n_head_channels = self.n_head_channels.unwrap_or(self.channels);
         let n_heads = self.channels / n_head_channels;
         let group_norm = GroupNormConfig::new(self.n_groups, self.channels)
@@ -433,7 +447,7 @@ impl<B: Backend> AttentionBlock<B> {
             .swap_dims(1, 2)
     }
 
-    fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
+    pub fn forward(&self, xs: Tensor<B, 4>) -> Tensor<B, 4> {
         let residual = xs.clone();
         let [n_batch, channel, height, width] = xs.dims();
         let xs = self
@@ -506,8 +520,8 @@ mod tests {
 
         let geglu = GeGlu {
             proj: nn::Linear {
-                weight: Param::new(ParamId::new(), weight),
-                bias: Some(Param::new(ParamId::new(), bias)),
+                weight: Param::initialized(ParamId::new(), weight),
+                bias: Some(Param::initialized(ParamId::new(), bias)),
             },
         };
 
@@ -562,8 +576,8 @@ mod tests {
 
         let geglu = GeGlu {
             proj: nn::Linear {
-                weight: Param::new(ParamId::new(), weight),
-                bias: Some(Param::new(ParamId::new(), bias)),
+                weight: Param::initialized(ParamId::new(), weight),
+                bias: Some(Param::initialized(ParamId::new(), bias)),
             },
         };
 

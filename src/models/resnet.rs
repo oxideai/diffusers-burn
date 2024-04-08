@@ -99,7 +99,7 @@ impl<B: Backend> ResnetBlock2D<B> {
 
         let xs = self.norm1.forward(xs.clone());
         let xs = self.conv1.forward(silu(xs));
-        match (temb, &self.time_emb_proj) {
+        let xs = match (temb, &self.time_emb_proj) {
             (Some(temb), Some(time_emb_proj)) => {
                 time_emb_proj
                     .forward(silu(temb))
@@ -109,7 +109,9 @@ impl<B: Backend> ResnetBlock2D<B> {
             }
             _ => xs.clone(),
         };
-        let xs = self.conv2.forward(silu(self.norm2.forward(xs)));
+        let xs = self.norm2.forward(xs);
+        let xs = silu(xs);
+        let xs = self.conv2.forward(xs);
         (shortcut_xs + xs) / self.output_scale_factor
     }
 }
