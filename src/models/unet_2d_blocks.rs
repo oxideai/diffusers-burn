@@ -614,6 +614,176 @@ impl<B: Backend> CrossAttnDownBlock2D<B> {
     }
 }
 
+#[derive(Config)]
+pub struct UpBlock2DConfig {
+    in_channels: usize,
+    prev_output_channels: usize,
+    out_channels: usize,
+    temb_channels: Option<usize>,
+    #[config(default = 1)]
+    pub num_layers: usize,
+    #[config(default = 1e-6)]
+    pub resnet_eps: f64,
+    // resnet_time_scale_shift: "default"
+    // resnet_act_fn: "swish"
+    #[config(default = 32)]
+    pub resnet_groups: usize,
+    #[config(default = 1.)]
+    pub output_scale_factor: f64,
+    #[config(default = true)]
+    pub add_upsample: bool,
+}
+
+#[derive(Module, Debug)]
+pub struct UpBlock2D<B: Backend> {
+    resnets: Vec<ResnetBlock2D<B>>,
+    upsampler: Option<Upsample2D<B>>,
+}
+
+impl UpBlock2DConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> UpBlock2D<B> {
+        let resnets = (0..self.num_layers)
+            .map(|i| {
+                let res_skip_channels = if i == self.num_layers - 1 {
+                    self.in_channels
+                } else {
+                    self.out_channels
+                };
+
+                let resnet_in_channels = if i == 0 {
+                    self.prev_output_channels
+                } else {
+                    self.out_channels
+                };
+
+                let in_channels = resnet_in_channels + res_skip_channels;
+
+                ResnetBlock2DConfig::new(self.in_channels)
+                    .with_out_channels(Some(self.out_channels))
+                    .with_temb_channels(self.temb_channels)
+                    .with_eps(self.resnet_eps)
+                    .with_output_scale_factor(self.output_scale_factor)
+                    .init(device)
+            })
+            .collect();
+
+        let upsampler = if self.add_upsample {
+            let upsampler =
+                Upsample2DConfig::new(self.out_channels, self.out_channels).init(device);
+            Some(upsampler)
+        } else {
+            None
+        };
+
+        UpBlock2D { resnets, upsampler }
+    }
+}
+
+impl<B: Backend> UpBlock2D<B> {
+    pub fn forward(
+        &self,
+        xs: Tensor<B, 4>,
+        res_xs: &[Tensor<B, 4>],
+        temb: Option<Tensor<B, 2>>,
+        upsample_size: Option<(usize, usize)>,
+    ) -> Tensor<B, 4> {
+        let mut xs = xs;
+        for (index, resnet) in self.resnets.iter().enumerate() {
+            xs = Tensor::cat(
+                vec![xs.clone(), res_xs[res_xs.len() - index - 1].clone()],
+                1,
+            );
+            xs = resnet.forward(xs, temb.clone());
+        }
+
+        match &self.upsampler {
+            Some(upsampler) => upsampler.forward(xs, upsample_size),
+            None => xs,
+        }
+    }
+}
+
+#[derive(Config)]
+pub struct CrossAttnUpBlock2DConfig {
+    in_channels: usize,
+    prev_output_channels: usize,
+    out_channels: usize,
+    temb_channels: Option<usize>,
+    pub upblock: UpBlock2DConfig,
+    #[config(default = 1)]
+    pub attn_num_head_channels: usize,
+    #[config(default = 1280)]
+    pub cross_attention_dim: usize,
+    // attention_type: "default"
+    pub sliced_attention_size: Option<usize>,
+    #[config(default = false)]
+    pub use_linear_projection: bool,
+}
+
+#[derive(Module, Debug)]
+pub struct CrossAttnUpBlock2D<B: Backend> {
+    pub upblock: UpBlock2D<B>,
+    pub attentions: Vec<SpatialTransformer<B>>,
+}
+
+impl CrossAttnUpBlock2DConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> CrossAttnUpBlock2D<B> {
+        let mut upblock_config = self.upblock.clone();
+        upblock_config.in_channels = self.in_channels;
+        upblock_config.prev_output_channels = self.prev_output_channels;
+        upblock_config.out_channels = self.out_channels;
+        upblock_config.temb_channels = self.temb_channels;
+        let upblock = upblock_config.init(device);
+
+        let attentions = (0..self.upblock.num_layers)
+            .map(|_| {
+                SpatialTransformerConfig::new(
+                    self.out_channels,
+                    self.attn_num_head_channels,
+                    self.out_channels / self.attn_num_head_channels,
+                )
+                .with_depth(1)
+                .with_d_context(Some(self.cross_attention_dim))
+                .with_n_groups(self.upblock.resnet_groups)
+                .with_sliced_attn_size(self.sliced_attention_size)
+                .with_use_linear_projection(self.use_linear_projection)
+                .init(device)
+            })
+            .collect();
+
+        CrossAttnUpBlock2D {
+            upblock,
+            attentions,
+        }
+    }
+}
+
+impl<B: Backend> CrossAttnUpBlock2D<B> {
+    pub fn forward(
+        &self,
+        xs: Tensor<B, 4>,
+        res_xs: &[Tensor<B, 4>],
+        temb: Option<Tensor<B, 2>>,
+        upsample_size: Option<(usize, usize)>,
+        encoder_hidden_states: Option<Tensor<B, 3>>,
+    ) -> Tensor<B, 4> {
+        let mut xs = xs;
+        for (index, resnet) in self.upblock.resnets.iter().enumerate() {
+            xs = Tensor::cat(
+                vec![xs.clone(), res_xs[res_xs.len() - index - 1].clone()],
+                1,
+            );
+            xs = resnet.forward(xs, temb.clone());
+            xs = self.attentions[index].forward(xs, encoder_hidden_states.clone());
+        }
+
+        match &self.upblock.upsampler {
+            Some(upsampler) => upsampler.forward(xs, upsample_size),
+            None => xs,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
