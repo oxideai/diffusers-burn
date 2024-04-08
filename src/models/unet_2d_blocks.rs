@@ -408,6 +408,11 @@ impl UNetMidBlock2DCrossAttnConfig {
                 self.attn_num_head_channels,
                 self.in_channels / self.attn_num_head_channels,
             )
+            .with_depth(1)
+            .with_n_groups(resnet_groups)
+            .with_d_context(Some(self.cross_attn_dim))
+            .with_sliced_attn_size(self.sliced_attention_size)
+            .with_use_linear_projection(self.use_linear_projection)
             .init(device);
 
             let resnet_block = ResnetBlock2DConfig::new(self.in_channels)
@@ -446,6 +451,166 @@ impl<B: Backend> UNetMidBlock2DCrossAttn<B> {
         }
 
         xs
+    }
+}
+
+#[derive(Config, Copy)]
+pub struct DownBlock2DConfig {
+    in_channels: usize,
+    out_channels: usize,
+    temb_channels: Option<usize>,
+    #[config(default = 1)]
+    pub num_layers: usize,
+    #[config(default = 1e-6)]
+    pub resnet_eps: f64,
+    // resnet_time_scale_shift: "default"
+    // resnet_act_fn: "swish"
+    #[config(default = 32)]
+    pub resnet_groups: usize,
+    #[config(default = 1.)]
+    pub output_scale_factor: f64,
+    #[config(default = true)]
+    pub add_downsample: bool,
+    #[config(default = 1)]
+    pub downsample_padding: usize,
+}
+
+#[derive(Module, Debug)]
+pub struct DownBlock2D<B: Backend> {
+    resnets: Vec<ResnetBlock2D<B>>,
+    downsampler: Option<Downsample2D<B>>,
+}
+
+impl DownBlock2DConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> DownBlock2D<B> {
+        let resnets = (0..self.num_layers)
+            .map(|_| {
+                ResnetBlock2DConfig::new(self.out_channels)
+                    .with_eps(self.resnet_eps)
+                    .with_groups(self.resnet_groups)
+                    .with_output_scale_factor(self.output_scale_factor)
+                    .with_temb_channels(self.temb_channels)
+                    .init(device)
+            })
+            .collect();
+
+        let downsampler = if self.add_downsample {
+            Some(
+                Downsample2DConfig::new(
+                    self.out_channels,
+                    true,
+                    self.out_channels,
+                    self.downsample_padding,
+                )
+                .init(device),
+            )
+        } else {
+            None
+        };
+
+        DownBlock2D {
+            resnets,
+            downsampler,
+        }
+    }
+}
+
+impl<B: Backend> DownBlock2D<B> {
+    pub fn forward(
+        &self,
+        xs: Tensor<B, 4>,
+        temb: Option<Tensor<B, 2>>,
+    ) -> (Tensor<B, 4>, Vec<Tensor<B, 4>>) {
+        let mut xs = xs;
+        let mut output_states = vec![];
+        for resnet in self.resnets.iter() {
+            xs = resnet.forward(xs, temb.clone());
+            output_states.push(xs.clone());
+        }
+
+        if let Some(downsampler) = &self.downsampler {
+            xs = downsampler.forward(xs);
+            output_states.push(xs.clone());
+        }
+
+        (xs, output_states)
+    }
+}
+
+#[derive(Config)]
+pub struct CrossAttnDownBlock2DConfig {
+    in_channels: usize,
+    out_channels: usize,
+    temb_channels: Option<usize>,
+    pub downblock: DownBlock2DConfig,
+    #[config(default = 1)]
+    pub attn_num_head_channels: usize,
+    #[config(default = 1280)]
+    pub cross_attention_dim: usize,
+    // attention_type: "default"
+    pub sliced_attention_size: Option<usize>,
+    #[config(default = false)]
+    pub use_linear_projection: bool,
+}
+
+#[derive(Module, Debug)]
+pub struct CrossAttnDownBlock2D<B: Backend> {
+    downblock: DownBlock2D<B>,
+    attentions: Vec<SpatialTransformer<B>>,
+}
+
+impl CrossAttnDownBlock2DConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> CrossAttnDownBlock2D<B> {
+        let mut downblock = self.downblock;
+        downblock.in_channels = self.in_channels;
+        downblock.out_channels = self.out_channels;
+        downblock.temb_channels = self.temb_channels;
+        let downblock = self.downblock.init(device);
+
+        let attentions = (0..self.downblock.num_layers)
+            .map(|_| {
+                SpatialTransformerConfig::new(
+                    self.out_channels,
+                    self.attn_num_head_channels,
+                    self.out_channels / self.attn_num_head_channels,
+                )
+                .with_depth(1)
+                .with_d_context(Some(self.cross_attention_dim))
+                .with_n_groups(self.downblock.resnet_groups)
+                .with_sliced_attn_size(self.sliced_attention_size)
+                .with_use_linear_projection(self.use_linear_projection)
+                .init(device)
+            })
+            .collect();
+
+        CrossAttnDownBlock2D {
+            downblock,
+            attentions,
+        }
+    }
+}
+
+impl<B: Backend> CrossAttnDownBlock2D<B> {
+    pub fn forward(
+        &self,
+        xs: Tensor<B, 4>,
+        temb: Option<Tensor<B, 2>>,
+        encoder_hidden_states: Option<Tensor<B, 3>>,
+    ) -> (Tensor<B, 4>, Vec<Tensor<B, 4>>) {
+        let mut xs = xs;
+        let mut output_states = vec![];
+        for (resnet, attn) in self.downblock.resnets.iter().zip(self.attentions.iter()) {
+            xs = resnet.forward(xs, temb.clone());
+            xs = attn.forward(xs, encoder_hidden_states.clone());
+            output_states.push(xs.clone());
+        }
+
+        if let Some(downsampler) = &self.downblock.downsampler {
+            xs = downsampler.forward(xs);
+            output_states.push(xs.clone());
+        }
+
+        (xs, output_states)
     }
 }
 
