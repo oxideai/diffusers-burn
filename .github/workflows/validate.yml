@@ -25,7 +25,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [blaze/macos-14, ubuntu-latest, windows-latest]
+        os: [blaze/macos-14, blaze/ubuntu-latest, windows-latest]
         rust: [stable]
         backend: ["ndarray", "wgpu", "torch"]
         include:
