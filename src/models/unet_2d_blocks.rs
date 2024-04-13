@@ -658,7 +658,7 @@ impl UpBlock2DConfig {
 
                 let in_channels = resnet_in_channels + res_skip_channels;
 
-                ResnetBlock2DConfig::new(self.in_channels)
+                ResnetBlock2DConfig::new(in_channels)
                     .with_out_channels(Some(self.out_channels))
                     .with_temb_channels(self.temb_channels)
                     .with_eps(self.resnet_eps)
