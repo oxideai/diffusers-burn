@@ -14,7 +14,7 @@ The `diffusers-burn` crate is a conversion of [diffusers-rs](https://github.com/
 
 <br style="display: none;"/>
 
-_[Blaze](https://runblaze.dev) supports this project by providing ultra-fast Apple Silicon macOS Github Action Runners. Apply the discount code `BURN50` at checkout to enjoy 50% off your first year._
+_[Blaze](https://runblaze.dev) supports this project by providing ultra-fast Apple Silicon macOS Github Action Runners. Apply the discount code `AI25` at checkout to enjoy 25% off your first year._
 
 </div>
 
